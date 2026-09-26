@@ -627,6 +627,7 @@ def main():
     new_match_button_center = None
     last_new_match_click = 0.0
     next_new_match_scan = 0.0
+    new_match_click_attempts = 0
     new_match_start_stable = 0
     new_match_start_key = None
     new_match_scan_ms = 0.0
@@ -1093,6 +1094,7 @@ def main():
                     new_match_button_center = None
                     last_new_match_click = 0.0
                     next_new_match_scan = 0.0
+                    new_match_click_attempts = 0
                     new_match_start_stable = 0
                     new_match_start_key = None
                     new_match_scan_ms = 0.0
@@ -1174,6 +1176,7 @@ def main():
                         awaiting_new_match = False
                         new_match_button_stable = 0
                         new_match_button_center = None
+                        new_match_click_attempts = 0
                         new_match_start_stable = 0
                         new_match_start_key = None
                         new_match_scan_ms = 0.0
@@ -1539,52 +1542,132 @@ def main():
                                 new_match_button_stable += 1
 
                             if new_match_button_stable >= 2:
-                                origin = get_scrcpy_screen_origin(
-                                    scrcpy_hwnd
-                                )
+                                now = time.perf_counter()
 
                                 if (
-                                    origin is not None
-                                    and focus_scrcpy(scrcpy_hwnd)
+                                    now - last_new_match_click
+                                    >= 0.50
                                 ):
-                                    click_x = (
-                                        origin[0]
-                                        + result_button[0]
-                                    )
-                                    click_y = (
-                                        origin[1]
-                                        + result_button[1]
+                                    origin = get_scrcpy_screen_origin(
+                                        scrcpy_hwnd
                                     )
 
-                                    left_click_screen(
-                                        click_x,
-                                        click_y
-                                    )
+                                    if (
+                                        origin is not None
+                                        and focus_scrcpy(scrcpy_hwnd)
+                                    ):
+                                        click_x = (
+                                            origin[0]
+                                            + result_button[0]
+                                        )
+                                        click_y = (
+                                            origin[1]
+                                            + result_button[1]
+                                        )
 
-                                    awaiting_new_match = True
-                                    game_ready = False
-                                    cached_board_grid = None
-                                    baseline_frame = None
-                                    screen_interrupted = False
-                                    screen_interrupt_bad_samples = 0
-                                    screen_interrupt_clear_samples = 0
-                                    screen_interrupt_fraction = 0.0
+                                        left_click_screen(
+                                            click_x,
+                                            click_y
+                                        )
 
-                                    new_match_button_stable = 0
-                                    new_match_button_center = None
-                                    last_new_match_click = time.perf_counter()
-                                    next_new_match_scan = (
-                                        last_new_match_click
-                                        + 0.50
-                                    )
-                                    new_match_start_stable = 0
-                                    new_match_start_key = None
-                                    new_match_scan_ms = 0.0
+                                        last_new_match_click = (
+                                            time.perf_counter()
+                                        )
+                                        new_match_click_attempts += 1
 
-                                    print(
-                                        "[MATCH] Result screen detected | "
-                                        "clicked right-side New <time-control> button"
-                                    )
+                                        print(
+                                            "[MATCH] New-button click "
+                                            f"attempt "
+                                            f"{new_match_click_attempts}/3"
+                                        )
+
+                                        # Do not enter matchmaking until the
+                                        # click is visibly acknowledged. If the
+                                        # same result-page button is still
+                                        # present, the click did not register
+                                        # (or the page did not leave the result
+                                        # state yet), so a controlled retry is
+                                        # allowed.
+                                        click_ack_deadline = (
+                                            time.perf_counter()
+                                            + 0.60
+                                        )
+                                        button_still_present = True
+
+                                        while (
+                                            time.perf_counter()
+                                            < click_ack_deadline
+                                        ):
+                                            ack_frame = capture_screen(
+                                                sct,
+                                                scrcpy_hwnd
+                                            )
+
+                                            if ack_frame is None:
+                                                time.sleep(
+                                                    0.03
+                                                )
+                                                continue
+
+                                            ack_button = (
+                                                detect_new_game_button(
+                                                    ack_frame
+                                                )
+                                            )
+
+                                            if ack_button is None:
+                                                button_still_present = False
+                                                break
+
+                                            time.sleep(
+                                                0.03
+                                            )
+
+                                        if not button_still_present:
+                                            awaiting_new_match = True
+                                            game_ready = False
+                                            cached_board_grid = None
+                                            baseline_frame = None
+                                            screen_interrupted = False
+                                            screen_interrupt_bad_samples = 0
+                                            screen_interrupt_clear_samples = 0
+                                            screen_interrupt_fraction = 0.0
+
+                                            new_match_button_stable = 0
+                                            new_match_button_center = None
+                                            new_match_click_attempts = 0
+                                            next_new_match_scan = (
+                                                time.perf_counter()
+                                                + 0.50
+                                            )
+                                            new_match_start_stable = 0
+                                            new_match_start_key = None
+                                            new_match_scan_ms = 0.0
+
+                                            print(
+                                                "[MATCH] New-button click "
+                                                "confirmed | entering matchmaking"
+                                            )
+                                        else:
+                                            print(
+                                                "[MATCH] New-button click "
+                                                "not confirmed; result screen "
+                                                "still present"
+                                            )
+
+                                            if (
+                                                new_match_click_attempts
+                                                >= 3
+                                            ):
+                                                new_match_click_attempts = 0
+                                                new_match_button_stable = 0
+                                                new_match_button_center = None
+
+                                                print(
+                                                    "[MATCH] New-button click "
+                                                    "failed 3/3 times | "
+                                                    "will re-detect result screen"
+                                                )
 
                 # ============================================================
                 # MATCHMAKING -> FRESH GAME DETECTION
