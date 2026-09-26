@@ -521,13 +521,39 @@ def choose_stockfish_move(
             best_cp
         )
 
-        # The previous implementation returned +0.05 for every position
-        # whose best score was <= +0.05. That accidentally discarded every
-        # negative MultiPV candidate when the side to move was behind.
-        #
-        # Safety should be relative to the best available move, not relative
-        # to zero. If all reasonable moves are negative, a human can still
-        # choose a slightly worse negative move without throwing the game.
+        # Positive positions keep the original conservative floor so a
+        # small winning/equal position cannot cross below zero just for
+        # randomness. Negative positions use a symmetric relative floor so
+        # reasonable negative alternatives remain available.
+        if best_cp >= 0:
+            if best_cp <= 5:
+                return 5
+
+            if best_cp < 250:
+                allowed_drop = 50
+            elif best_cp < 500:
+                allowed_drop = 80
+            elif best_cp < 800:
+                allowed_drop = 120
+            elif best_cp < 1000:
+                allowed_drop = 150
+            else:
+                allowed_drop = min(
+                    250,
+                    max(
+                        120,
+                        int(
+                            best_cp
+                            * 0.05
+                        )
+                    )
+                )
+
+            return max(
+                5,
+                best_cp - allowed_drop
+            )
+
         magnitude = abs(
             best_cp
         )
@@ -1239,7 +1265,6 @@ def choose_stockfish_move(
         if (
             candidate["rank"] <= normal_rank_cap
             and candidate["cp"] >= human_floor_cp
-            and candidate["cp"] > 0
         )
     ]
 
