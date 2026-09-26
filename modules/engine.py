@@ -378,17 +378,45 @@ def choose_stockfish_move(
                 )
             )
 
-            # Rank is only a mild preference. This lets #3/#4/#5 and deeper
-            # safe moves appear instead of repeatedly forcing #1/#2.
+            # Rank is only a weak preference. Safe #3/#4/#5/#6
+            # candidates should have a real chance instead of repeatedly
+            # forcing #1/#2.
             rank_weight = max(
-                0.62,
+                0.78,
                 1.0 / (
                     1.0
-                    + (0.04 * rank)
+                    + (0.025 * rank)
                 )
             )
 
-            weight = rank_weight
+            # Keep evaluation quality relevant, but deliberately weaker than
+            # human feature preferences. Safety has already been enforced by
+            # the caller before this helper is reached.
+            pool_best_cp = max(
+                item.get("cp", 0)
+                for item in candidate_list
+            )
+            quality_gap = max(
+                0,
+                pool_best_cp - int(
+                    candidate.get("cp", 0)
+                )
+            )
+            quality_weight = (
+                0.82
+                + (
+                    0.38
+                    / (
+                        1.0
+                        + quality_gap / 120.0
+                    )
+                )
+            )
+
+            weight = (
+                rank_weight
+                * quality_weight
+            )
             move = candidate["move"]
 
             # Humans tend to notice an available capture, especially when
@@ -835,8 +863,8 @@ def choose_stockfish_move(
                 )
 
     # 1. GM LAZY CONVERSION: preserve the +8 start, but exit once the
-    # advantage is already very large. Inside the window, all sufficiently
-    # winning candidates are eligible instead of only #1-#4.
+    # advantage is already very large. Safe winning moves remain eligible,
+    # with the human preference helper deciding between them.
     if (
         current_advantage >= HUMAN_LIKE_LAZY_MIN_ADVANTAGE_CP
         and current_advantage < 1000
@@ -883,6 +911,7 @@ def choose_stockfish_move(
                     f"GM Lazy Conversion "
                     f"(#{chosen['rank'] + 1}) | "
                     f"SAFE_POOL={len(acceptable_finishers)} "
+                    f"FLOOR={lazy_floor_cp / 100:+.2f} "
                     f"BEST={current_advantage / 100:+.2f} "
                     f"SELECTED={chosen['cp'] / 100:+.2f}"
                     f"{capture_note}"
@@ -890,43 +919,54 @@ def choose_stockfish_move(
             }
         )
 
-    # 2. EMERGENCY PULL-UP: below +1.50.
+    # 2. LOW-ADVANTAGE HUMAN PLAY.
+    # Replace the old top-3 Pull-Up cage with a safe human pool. The pool
+    # expands when the opponent is weak/unknown and contracts against a
+    # genuinely strong opponent. Negative candidates are never invited while
+    # a safe positive continuation exists.
     if current_advantage < HUMAN_LIKE_PULLUP_MAX_ADVANTAGE_CP:
-        acceptable_defense = [best]
+        low_floor_cp = human_safety_floor_cp(
+            best_cp
+        )
 
-        for i in range(
-            1,
-            min(
-                HUMAN_LIKE_PULLUP_MAX_RANK_INDEX,
-                len(candidates)
-            )
+        if (
+            opponent_sample_count
+            < OPPONENT_MIN_SAMPLES
         ):
-            candidate = candidates[i]
+            low_rank_cap = 5
+        elif opponent_accuracy is None or opponent_accuracy < 70.0:
+            low_rank_cap = 5
+        elif opponent_accuracy < 80.0:
+            low_rank_cap = 4
+        elif opponent_accuracy < 88.0:
+            low_rank_cap = 3
+        else:
+            low_rank_cap = 2
 
+        low_safe_candidates = [
+            candidate
+            for candidate in candidates
             if (
-                abs(
-                    best_cp
-                    - candidate["cp"]
-                )
-                <= HUMAN_LIKE_PULLUP_MAX_CP_GAP
-            ):
-                acceptable_defense.append(
-                    candidate
-                )
+                candidate["rank"] <= low_rank_cap
+                and candidate["cp"] >= low_floor_cp
+                and candidate["cp"] > 0
+            )
+        ]
 
-        if current_advantage > 0:
-            positive_defense = [
-                candidate
-                for candidate in acceptable_defense
-                if candidate["cp"] > 0
+        if not low_safe_candidates:
+            low_safe_candidates = [
+                best
             ]
-
-            if positive_defense:
-                acceptable_defense = positive_defense
 
         chosen = choose_human_candidate(
             board,
-            acceptable_defense
+            low_safe_candidates
+        )
+
+        capture_note = (
+            " | HUMAN CAPTURE"
+            if board.is_capture(chosen["move"])
+            else ""
         )
 
         return (
@@ -937,10 +977,13 @@ def choose_stockfish_move(
                 "current_cp": current_advantage,
                 "selected_cp": chosen["cp"],
                 "reason": (
-                    f"Pull-Up Mode "
+                    f"Human Safe Play "
                     f"(#{chosen['rank'] + 1}) | "
-                    f"BEST={current_advantage / 100:+.2f} "
+                    f"SAFE_POOL={len(low_safe_candidates)} "
+                    f"FLOOR={low_floor_cp / 100:+.2f} "
+                    f"BEST={best_cp / 100:+.2f} "
                     f"SELECTED={chosen['cp'] / 100:+.2f}"
+                    f"{capture_note}"
                 )
             }
         )
@@ -1015,7 +1058,7 @@ def choose_stockfish_move(
                         )
                     }
                 )
-    
+
     # 4. BAKWAS: +5.00 to +8.00.
     if (
         HUMAN_LIKE_BAKWAS_MIN_ADVANTAGE_CP
@@ -1127,28 +1170,35 @@ def choose_stockfish_move(
                 }
             )
 
-    # 6. NORMAL HUMAN PLAY: every positive-evaluation candidate is
-    # eligible. MultiPV rank is only a tiny weight, so #3/#4/#5 and deeper
-    # safe choices can naturally appear. Losing/negative candidates remain
-    # excluded whenever a positive candidate exists.
+    # 6. NORMAL HUMAN PLAY.
+    # Use a broader safe pool so #4/#5/#6/#7/#8 can appear naturally.
+    # Human feature preferences are applied only after the safety floor.
     human_floor_cp = human_safety_floor_cp(
         best_cp
     )
+
+    if opponent_sample_count < OPPONENT_MIN_SAMPLES:
+        normal_rank_cap = 7
+    elif opponent_accuracy is None or opponent_accuracy < 70.0:
+        normal_rank_cap = 7
+    elif opponent_accuracy < 80.0:
+        normal_rank_cap = 6
+    elif opponent_accuracy < 88.0:
+        normal_rank_cap = 5
+    else:
+        normal_rank_cap = 3
 
     human_safe_candidates = [
         candidate
         for candidate in candidates
         if (
-            candidate["cp"]
-            >= human_floor_cp
-            and candidate["cp"]
-            > 0
+            candidate["rank"] <= normal_rank_cap
+            and candidate["cp"] >= human_floor_cp
+            and candidate["cp"] > 0
         )
     ]
 
     if not human_safe_candidates:
-        # No positive continuation exists in the MultiPV set; fall back to
-        # the existing best move rather than inventing a losing preference.
         human_safe_candidates = [
             best
         ]
@@ -1175,384 +1225,15 @@ def choose_stockfish_move(
                 f"Human Safe Fuzzy "
                 f"(#{chosen['rank'] + 1}) | "
                 f"SAFE_POOL={len(human_safe_candidates)} "
+                f"CAP=#"
+                f"{normal_rank_cap + 1} "
                 f"FLOOR={human_floor_cp / 100:+.2f} "
-                f"BEST={current_advantage / 100:+.2f} "
+                f"BEST={best_cp / 100:+.2f} "
                 f"SELECTED={chosen['cp'] / 100:+.2f}"
                 f"{capture_note}"
             )
         }
     )
-
-    if best_cp > MIN_POSITIVE_CP:
-        normal_max_drop = safe_drop_fraction(
-            best_cp
-        )
-
-        max_drop = min(
-            normal_max_drop,
-            adaptive_max_drop
-        )
-
-        floor_cp = max(
-            5,
-            int(
-                best_cp
-                * (
-                    1.0
-                    - max_drop
-                )
-            )
-        )
-
-        global _advantage_progress_target_cp
-        global _advantage_progress_hold_moves
-        global _advantage_progress_hold_limit
-        global _advantage_progress_side
-
-        advantage_mode = False
-        advantage_maintain = False
-        advantage_growth = False
-        advantage_target_cp = None
-
-        if best_cp < HUMAN_ADVANTAGE_START_CP:
-            _advantage_progress_target_cp = None
-            _advantage_progress_hold_moves = 0
-            _advantage_progress_hold_limit = random.randint(
-                HUMAN_ADVANTAGE_HOLD_MIN_MOVES,
-                HUMAN_ADVANTAGE_HOLD_MAX_MOVES
-            )
-            _advantage_progress_side = None
-
-        else:
-            if _advantage_progress_side != mover:
-                _advantage_progress_target_cp = None
-                _advantage_progress_hold_moves = 0
-                _advantage_progress_hold_limit = random.randint(
-                    HUMAN_ADVANTAGE_HOLD_MIN_MOVES,
-                    HUMAN_ADVANTAGE_HOLD_MAX_MOVES
-                )
-                _advantage_progress_side = mover
-
-            if _advantage_progress_target_cp is None:
-                _advantage_progress_target_cp = best_cp
-                _advantage_progress_hold_moves = 0
-                _advantage_progress_hold_limit = random.randint(
-                    HUMAN_ADVANTAGE_HOLD_MIN_MOVES,
-                    HUMAN_ADVANTAGE_HOLD_MAX_MOVES
-                )
-
-            # Do not lower the stored winning target for a small evaluation
-            # fluctuation. Only reset it when the engine's best itself has
-            # fallen materially below the protected winning level.
-            if (
-                best_cp
-                < _advantage_progress_target_cp
-                - HUMAN_ADVANTAGE_PROTECT_BAND_CP
-            ):
-                _advantage_progress_target_cp = best_cp
-                _advantage_progress_hold_moves = 0
-
-            advantage_target_cp = int(
-                _advantage_progress_target_cp
-            )
-
-            advantage_mode = True
-
-            # Every few actual Stockfish moves, make a progress move. This is
-            # independent of whether the evaluation changed on the previous
-            # move, so the bot cannot sit on +6.0 for dozens of moves simply
-            # because the short engine scores happen to repeat.
-            _advantage_progress_hold_moves += 1
-
-            progress_due = (
-                _advantage_progress_hold_moves
-                >= _advantage_progress_hold_limit
-                or
-                best_cp
-                >= advantage_target_cp
-                + HUMAN_ADVANTAGE_GROWTH_TRIGGER_CP
-                or
-                opponent_pressure
-            )
-
-            if progress_due:
-                # If the position genuinely improved, advance only a small
-                # step toward the new best instead of jumping straight there.
-                if best_cp > advantage_target_cp + 10:
-                    growth_step = random.randint(
-                        HUMAN_ADVANTAGE_GROWTH_STEP_MIN_CP,
-                        HUMAN_ADVANTAGE_GROWTH_STEP_MAX_CP
-                    )
-
-                    _advantage_progress_target_cp = min(
-                        best_cp,
-                        advantage_target_cp + growth_step
-                    )
-                    advantage_target_cp = int(
-                        _advantage_progress_target_cp
-                    )
-                    advantage_growth = True
-
-                else:
-                    # Even without a visible CP jump, deliberately use a
-                    # stronger move from the current safe top end so the game
-                    # keeps developing instead of repeating a passive hold.
-                    advantage_growth = True
-
-                _advantage_progress_hold_moves = 0
-                _advantage_progress_hold_limit = random.randint(
-                    HUMAN_ADVANTAGE_HOLD_MIN_MOVES,
-                    HUMAN_ADVANTAGE_HOLD_MAX_MOVES
-                )
-            else:
-                advantage_maintain = True
-
-            # Protect the current winning advantage. +6 should not casually
-            # fall toward +4 just because a lower MultiPV move exists.
-            floor_cp = max(
-                floor_cp,
-                int(
-                    advantage_target_cp
-                    - HUMAN_ADVANTAGE_PROTECT_BAND_CP
-                )
-            )
-        safe = [
-            c
-            for c in candidates
-            if (
-                c["cp"] >= floor_cp
-                and c["cp"] > 0
-                and c["rank"] <= adaptive_max_rank
-            )
-        ]
-
-        if not safe:
-            safe = [best]
-
-        non_best = [
-            c
-            for c in safe
-            if c["rank"] > 0
-        ]
-
-        if (
-            len(non_best) >= 2
-            and random.random() < 0.72
-        ):
-            pool = non_best
-        else:
-            pool = safe
-
-        roll = random.random()
-
-        if roll < 0.45:
-            target_drop = random.uniform(
-                0.00,
-                max_drop * 0.35
-            )
-
-        elif roll < 0.78:
-            target_drop = random.uniform(
-                max_drop * 0.35,
-                max_drop * 0.70
-            )
-
-        elif roll < 0.95:
-            target_drop = random.uniform(
-                max_drop * 0.70,
-                max_drop * 0.90
-            )
-
-        else:
-            target_drop = random.uniform(
-                max_drop * 0.90,
-                max_drop
-            )
-
-        desired_cp = max(
-            floor_cp,
-            int(
-                best_cp
-                * (
-                    1.0
-                    - target_drop
-                )
-            )
-        )
-
-        if advantage_mode:
-            if advantage_maintain:
-                desired_cp = min(
-                    best_cp,
-                    max(
-                        floor_cp,
-                        int(
-                            advantage_target_cp
-                            + random.uniform(
-                                -HUMAN_ADVANTAGE_MAINTAIN_BAND_CP * 0.20,
-                                HUMAN_ADVANTAGE_MAINTAIN_BAND_CP * 0.20
-                            )
-                        )
-                    )
-                )
-            else:
-                desired_cp = min(
-                    best_cp,
-                    max(
-                        floor_cp,
-                        int(
-                            advantage_target_cp
-                        )
-                    )
-                )
-
-        if advantage_mode:
-            if advantage_growth:
-                # Progress move: prefer the strongest few safe continuations.
-                # This is what keeps a +6 position actively developing even
-                # when the short evaluation does not move on every turn.
-                progress_pool = [
-                    c
-                    for c in safe
-                    if c["cp"] >= max(
-                        floor_cp,
-                        advantage_target_cp,
-                        best_cp - 25
-                    )
-                ]
-
-                if progress_pool:
-                    pool = progress_pool
-                else:
-                    pool = safe
-            else:
-                maintain_min = max(
-                    floor_cp,
-                    int(
-                        advantage_target_cp
-                        - HUMAN_ADVANTAGE_MAINTAIN_BAND_CP
-                    )
-                )
-
-                maintain_pool = [
-                    c
-                    for c in safe
-                    if (
-                        c["cp"] >= maintain_min
-                        and c["cp"] <= best_cp
-                    )
-                ]
-
-                if maintain_pool:
-                    pool = maintain_pool
-
-        if advantage_mode and advantage_growth:
-            rank_factors = {
-                0: 4.50,
-                1: 2.35,
-                2: 1.55,
-                3: 1.05,
-                4: 0.70,
-                5: 0.50,
-                6: 0.35,
-                7: 0.25,
-            }
-        else:
-            rank_factors = {
-                0: 0.95,
-                1: 1.20,
-                2: 1.25,
-                3: 1.15,
-                4: 1.00,
-                5: 0.85,
-                6: 0.70,
-                7: 0.55,
-            }
-
-        weighted = []
-
-        for candidate in pool:
-            distance = abs(
-                candidate["cp"]
-                - desired_cp
-            )
-
-            weight = (
-                1.0
-                / (
-                    1.0
-                    + distance / 35.0
-                )
-            )
-
-            weight *= (
-                rank_factors.get(
-                    candidate["rank"],
-                    0.45
-                )
-            )
-
-            weighted.append(
-                (
-                    candidate,
-                    max(
-                        0.01,
-                        weight
-                    )
-                )
-            )
-
-        total = sum(
-            weight
-            for _, weight
-            in weighted
-        )
-
-        pick = random.uniform(
-            0,
-            total
-        )
-
-        running = 0.0
-        selected = weighted[0][0]
-
-        for candidate, weight in weighted:
-            running += weight
-
-            if pick <= running:
-                selected = candidate
-                break
-
-        return (
-            selected["move"],
-            selected["info"],
-            {
-                "rank": selected["rank"],
-                "current_cp": best_cp,
-                "selected_cp": selected["cp"],
-                "reason": (
-                    (
-                        "advantage growth"
-                        if advantage_mode and advantage_growth
-                        else "advantage maintain"
-                        if advantage_mode
-                        else "controlled shuffle"
-                    )
-                    + " | "
-                    + f"BEST={best_cp/100:+.2f} "
-                    + f"SELECTED={selected['cp']/100:+.2f} "
-                    + f"RANK=#{selected['rank'] + 1} "
-                    + f"FLOOR={floor_cp/100:+.2f} "
-                    + f"MAX_DROP={max_drop*100:.1f}% "
-                    + f"OPP="
-                    f"{profile['opponent_accuracy'] if profile['opponent_accuracy'] is not None else 0.0:.1f}% "
-                    f"TARGET="
-                    f"{profile['target_accuracy']:.1f}% "
-                    f"RANKCAP=#"
-                    f"{adaptive_max_rank + 1}"
-                )
-            }
-        )
 
     near_equal_floor = (
         best_cp - 20
