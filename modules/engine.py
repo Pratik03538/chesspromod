@@ -348,7 +348,8 @@ def choose_stockfish_move(
     previous_eval_white_cp=None,
     opponent_accuracy=None,
     opponent_sample_count=0,
-    opponent_pressure=False
+    opponent_pressure=False,
+    engine=None
 ):
     if not multipv_infos:
         return (
@@ -437,60 +438,8 @@ def choose_stockfish_move(
         profile["max_eval_drop"]
     )
 
-    reference_cp = None
-
-    if previous_eval_white_cp is not None:
-        reference_cp = (
-            previous_eval_white_cp
-            if mover == chess.WHITE
-            else -previous_eval_white_cp
-        )
-
-    if (
-        reference_cp is not None
-        and reference_cp >= FORCE_BEST_MIN_CP
-        and not (
-            best["mate"] is not None
-            and best["mate"] > 0
-            and best["mate"] <= MATE_GRACE_MAX
-        )
-    ):
-        improvement_fraction = (
-            (
-                best_cp
-                - reference_cp
-            )
-            / max(
-                1,
-                abs(reference_cp)
-            )
-        )
-
-        if (
-            improvement_fraction
-            >= FORCE_BEST_IMPROVEMENT_FRACTION
-        ):
-            selected = best
-
-            return (
-                selected["move"],
-                selected["info"],
-                {
-                    "rank": selected["rank"],
-                    "current_cp": best_cp,
-                    "selected_cp": selected["cp"],
-                    "reason": (
-                        f"FORCED #1 | "
-                        f"reference="
-                        f"+{reference_cp/100:.2f} "
-                        f"best="
-                        f"+{best_cp/100:.2f} "
-                        f"improvement="
-                        f"{improvement_fraction*100:.0f}%"
-                    )
-                }
-            )
-
+    # The Colab selector does not force #1 from the previous evaluation.
+    # Human-like selection below is driven by the current MultiPV scores.
     if (
         best["mate"] is not None
         and best["mate"] > 0
@@ -720,6 +669,296 @@ def choose_stockfish_move(
                 )
             }
         )
+
+    # ================================================================
+    # EXACT HUMAN-LIKE PLAYING LOGIC
+    # Based directly on the supplied Colab get_dynamic_human_move().
+    # Candidate scores are already from the mover's point of view.
+    # ================================================================
+
+    # 1. GM LAZY CONVERSION: +8.00 or better.
+    if best_cp >= HUMAN_LIKE_LAZY_MIN_ADVANTAGE_CP:
+        acceptable_finishers = [best]
+
+        for i in range(
+            1,
+            min(
+                HUMAN_LIKE_LAZY_MAX_RANK_INDEX,
+                len(candidates)
+            )
+        ):
+            candidate = candidates[i]
+
+            if (
+                candidate["cp"]
+                > HUMAN_LIKE_LAZY_MIN_RESULT_CP
+            ):
+                acceptable_finishers.append(candidate)
+
+        chosen = random.choice(
+            acceptable_finishers
+        )
+
+        return (
+            chosen["move"],
+            chosen["info"],
+            {
+                "rank": chosen["rank"],
+                "current_cp": best_cp,
+                "selected_cp": chosen["cp"],
+                "reason": (
+                    f"GM Lazy Conversion "
+                    f"(#{chosen['rank'] + 1}) | "
+                    f"BEST={best_cp / 100:+.2f} "
+                    f"SELECTED={chosen['cp'] / 100:+.2f}"
+                )
+            }
+        )
+
+    # 2. EMERGENCY PULL-UP: below +1.50.
+    if best_cp < HUMAN_LIKE_PULLUP_MAX_ADVANTAGE_CP:
+        acceptable_defense = [best]
+
+        for i in range(
+            1,
+            min(
+                HUMAN_LIKE_PULLUP_MAX_RANK_INDEX,
+                len(candidates)
+            )
+        ):
+            candidate = candidates[i]
+
+            if (
+                abs(
+                    best_cp
+                    - candidate["cp"]
+                )
+                <= HUMAN_LIKE_PULLUP_MAX_CP_GAP
+            ):
+                acceptable_defense.append(
+                    candidate
+                )
+
+        chosen = random.choice(
+            acceptable_defense
+        )
+
+        return (
+            chosen["move"],
+            chosen["info"],
+            {
+                "rank": chosen["rank"],
+                "current_cp": best_cp,
+                "selected_cp": chosen["cp"],
+                "reason": (
+                    f"Pull-Up Mode "
+                    f"(#{chosen['rank'] + 1}) | "
+                    f"BEST={best_cp / 100:+.2f} "
+                    f"SELECTED={chosen['cp'] / 100:+.2f}"
+                )
+            }
+        )
+
+    # 3. KILLER INSTINCT: exact 1/15 chance.
+    if (
+        engine is not None
+        and random.randint(
+            1,
+            HUMAN_LIKE_DEEP_CHANCE_DENOM
+        ) == 1
+    ):
+        deep_result = engine.analyse(
+            board,
+            chess.engine.Limit(
+                depth=HUMAN_LIKE_DEEP_DEPTH
+            )
+        )
+
+        deep_move = deep_result.get(
+            "pv",
+            [None]
+        )[0]
+
+        if (
+            deep_move is not None
+            and deep_move in board.legal_moves
+        ):
+            deep_score = deep_result.get(
+                "score"
+            )
+
+            deep_cp = (
+                deep_score.pov(
+                    board.turn
+                ).score(
+                    mate_score=100000
+                )
+                if deep_score is not None
+                else best_cp
+            )
+
+            if deep_cp is None:
+                deep_cp = best_cp
+
+            return (
+                deep_move,
+                deep_result,
+                {
+                    "rank": 0,
+                    "current_cp": best_cp,
+                    "selected_cp": int(deep_cp),
+                    "reason": (
+                        "GREAT MOVE (Deep Calc) | "
+                        f"BEST={best_cp / 100:+.2f} "
+                        f"DEEP={deep_cp / 100:+.2f}"
+                    )
+                }
+            )
+
+    # 4. BAKWAS: +5.00 to +8.00.
+    if (
+        HUMAN_LIKE_BAKWAS_MIN_ADVANTAGE_CP
+        < best_cp
+        < HUMAN_LIKE_BAKWAS_MAX_ADVANTAGE_CP
+        and random.randint(
+            1,
+            HUMAN_LIKE_BAKWAS_CHANCE_DENOM
+        ) == 1
+    ):
+        start_rank = (
+            HUMAN_LIKE_BAKWAS_START_RANK_INDEX
+        )
+        end_rank = min(
+            HUMAN_LIKE_BAKWAS_END_RANK_INDEX,
+            len(candidates)
+        )
+
+        if start_rank < end_rank:
+            bakwas_candidates = [
+                candidate
+                for candidate in candidates[
+                    start_rank:end_rank
+                ]
+                if (
+                    candidate["cp"]
+                    > HUMAN_LIKE_BAKWAS_MIN_RESULT_CP
+                )
+            ]
+
+            if bakwas_candidates:
+                chosen = random.choice(
+                    bakwas_candidates
+                )
+
+                return (
+                    chosen["move"],
+                    chosen["info"],
+                    {
+                        "rank": chosen["rank"],
+                        "current_cp": best_cp,
+                        "selected_cp": chosen["cp"],
+                        "reason": (
+                            f"BAKWAS MOVE "
+                            f"(Engine #{chosen['rank'] + 1}) | "
+                            f"BEST={best_cp / 100:+.2f} "
+                            f"SELECTED={chosen['cp'] / 100:+.2f}"
+                        )
+                    }
+                )
+
+    # 5. NORMAL INACCURACY: +2.50 to +5.00.
+    if (
+        HUMAN_LIKE_INACCURACY_MIN_ADVANTAGE_CP
+        < best_cp
+        <= HUMAN_LIKE_INACCURACY_MAX_ADVANTAGE_CP
+        and random.randint(
+            1,
+            HUMAN_LIKE_INACCURACY_CHANCE_DENOM
+        ) == 1
+    ):
+        start_rank = (
+            HUMAN_LIKE_INACCURACY_START_RANK_INDEX
+        )
+        end_rank = min(
+            HUMAN_LIKE_INACCURACY_END_RANK_INDEX,
+            len(candidates)
+        )
+
+        inaccuracy_candidates = [
+            candidate
+            for candidate in candidates[
+                start_rank:end_rank
+            ]
+            if (
+                candidate["cp"]
+                > HUMAN_LIKE_INACCURACY_MIN_RESULT_CP
+            )
+        ]
+
+        if inaccuracy_candidates:
+            chosen = random.choice(
+                inaccuracy_candidates
+            )
+
+            return (
+                chosen["move"],
+                chosen["info"],
+                {
+                    "rank": chosen["rank"],
+                    "current_cp": best_cp,
+                    "selected_cp": chosen["cp"],
+                    "reason": (
+                        f"INACCURACY "
+                        f"(Engine #{chosen['rank'] + 1}) | "
+                        f"BEST={best_cp / 100:+.2f} "
+                        f"SELECTED={chosen['cp'] / 100:+.2f}"
+                    )
+                }
+            )
+
+    # 6. NORMAL HUMAN PLAY: #1, #2, #3 within 0.40 pawns.
+    acceptable_moves = [
+        best
+    ]
+
+    for i in range(
+        1,
+        min(
+            HUMAN_LIKE_NORMAL_MAX_RANK_INDEX,
+            len(candidates)
+        )
+    ):
+        candidate = candidates[i]
+
+        if (
+            abs(
+                best_cp
+                - candidate["cp"]
+            )
+            <= HUMAN_LIKE_NORMAL_MAX_CP_GAP
+        ):
+            acceptable_moves.append(
+                candidate
+            )
+
+    chosen = random.choice(
+        acceptable_moves
+    )
+
+    return (
+        chosen["move"],
+        chosen["info"],
+        {
+            "rank": chosen["rank"],
+            "current_cp": best_cp,
+            "selected_cp": chosen["cp"],
+            "reason": (
+                f"Fuzzy (#{chosen['rank'] + 1}) | "
+                f"BEST={best_cp / 100:+.2f} "
+                f"SELECTED={chosen['cp'] / 100:+.2f}"
+            )
+        }
+    )
 
     if best_cp > MIN_POSITIVE_CP:
         normal_max_drop = safe_drop_fraction(
