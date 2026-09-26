@@ -463,8 +463,7 @@ def click_move(
     scrcpy_hwnd,
     sct=None,
     promotion_color=None,
-    before_frame=None,
-    premove=False
+    before_frame=None
 ):
     if not focus_scrcpy(
         scrcpy_hwnd
@@ -484,9 +483,8 @@ def click_move(
         )
         return False
 
-    # Touch-to-touch: source tap, short human-like pause, target tap.
-    # There is intentionally no mouse-down while moving between squares,
-    # so the piece is never dragged in a straight cursor line.
+    # Touch-to-touch: source tap, short randomized pause, target tap.
+    # There is intentionally no mouse-down while moving between squares.
     sx, sy = square_screen_center(
         move.from_square,
         board_coords,
@@ -503,9 +501,8 @@ def click_move(
         screen_origin=screen_origin
     )
 
-    gesture_name = "PREMOVE" if premove else "TOUCH"
     print(
-        f"[BOT {gesture_name}] {move.uci()} "
+        f"[BOT TOUCH] {move.uci()} "
         f"source=({sx},{sy}) target=({tx},{ty})"
     )
 
@@ -514,14 +511,11 @@ def click_move(
         0
     )
 
-    # Source square tap.
     left_click_screen(
         sx,
         sy
     )
 
-    # A very short randomized pause gives the mobile UI time to register
-    # the selected square without adding noticeable bullet latency.
     time.sleep(
         random.uniform(
             TOUCH_SOURCE_PAUSE_MIN,
@@ -529,9 +523,6 @@ def click_move(
         )
     )
 
-    # Target square tap. For a supported chess premove UI this same pair of
-    # taps queues the move while the opponent is thinking; otherwise the
-    # normal path behaves as a regular source/target tap sequence.
     left_click_screen(
         tx,
         ty
