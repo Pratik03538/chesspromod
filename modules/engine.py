@@ -63,6 +63,77 @@ def side_material(
     return total
 
 
+
+def choose_human_candidate(
+    board,
+    candidate_list
+):
+    """Choose a human-like candidate without making MultiPV rank dominant.
+
+    Every candidate already passed by the caller remains eligible. Rank only
+    has a very small effect; safe captures receive a much stronger preference,
+    matching the tendency to take an available opponent piece.
+    """
+    if not candidate_list:
+        return None
+
+    if len(candidate_list) == 1:
+        return candidate_list[0]
+
+    weighted = []
+
+    for candidate in candidate_list:
+        rank = int(candidate.get("rank", 0))
+
+        # Keep rank influence intentionally flat: #1/#2 should not dominate
+        # simply because Stockfish listed them first.
+        rank_weight = max(
+            0.90,
+            1.0 - (rank * 0.006)
+        )
+
+        weight = rank_weight
+        move = candidate["move"]
+
+        if board.is_capture(move):
+            captured_piece = board.piece_at(
+                move.to_square
+            )
+
+            if (
+                captured_piece is None
+                and board.is_en_passant(move)
+            ):
+                captured_value = material_value(
+                    chess.PAWN
+                )
+            elif captured_piece is not None:
+                captured_value = material_value(
+                    captured_piece.piece_type
+                )
+            else:
+                captured_value = 0
+
+            capture_weight = (
+                4.0
+                + min(
+                    captured_value,
+                    900
+                ) / 900.0 * 2.0
+            )
+
+            weight *= capture_weight
+
+        weighted.append(
+            (candidate, weight)
+        )
+
+    return random.choices(
+        [item[0] for item in weighted],
+        weights=[item[1] for item in weighted],
+        k=1
+    )[0]
+
 def classify_move_quality(
     before_board,
     after_board,
@@ -703,27 +774,36 @@ def choose_stockfish_move(
                     current_eval
                 )
 
-    # 1. GM LAZY CONVERSION: +8.00 or better.
-    if current_advantage >= HUMAN_LIKE_LAZY_MIN_ADVANTAGE_CP:
-        acceptable_finishers = [best]
-
-        for i in range(
-            1,
-            min(
-                HUMAN_LIKE_LAZY_MAX_RANK_INDEX,
-                len(candidates)
-            )
-        ):
-            candidate = candidates[i]
-
+    # 1. GM LAZY CONVERSION: preserve the +8 start, but exit once the
+    # advantage is already very large. Inside the window, all sufficiently
+    # winning candidates are eligible instead of only #1-#4.
+    if (
+        current_advantage >= HUMAN_LIKE_LAZY_MIN_ADVANTAGE_CP
+        and current_advantage < HUMAN_LIKE_LAZY_MAX_ADVANTAGE_CP
+    ):
+        acceptable_finishers = [
+            candidate
+            for candidate in candidates
             if (
                 candidate["cp"]
                 > HUMAN_LIKE_LAZY_MIN_RESULT_CP
-            ):
-                acceptable_finishers.append(candidate)
+            )
+        ]
 
-        chosen = random.choice(
+        if not acceptable_finishers:
+            acceptable_finishers = [
+                best
+            ]
+
+        chosen = choose_human_candidate(
+            board,
             acceptable_finishers
+        )
+
+        capture_note = (
+            " | HUMAN CAPTURE"
+            if board.is_capture(chosen["move"])
+            else ""
         )
 
         return (
@@ -736,8 +816,10 @@ def choose_stockfish_move(
                 "reason": (
                     f"GM Lazy Conversion "
                     f"(#{chosen['rank'] + 1}) | "
+                    f"SAFE_POOL={len(acceptable_finishers)} "
                     f"BEST={current_advantage / 100:+.2f} "
                     f"SELECTED={chosen['cp'] / 100:+.2f}"
+                    f"{capture_note}"
                 )
             }
         )
@@ -766,7 +848,8 @@ def choose_stockfish_move(
                     candidate
                 )
 
-        chosen = random.choice(
+        chosen = choose_human_candidate(
+            board,
             acceptable_defense
         )
 
@@ -873,7 +956,8 @@ def choose_stockfish_move(
             ]
 
             if bakwas_candidates:
-                chosen = random.choice(
+                chosen = choose_human_candidate(
+                    board,
                     bakwas_candidates
                 )
 
@@ -923,7 +1007,8 @@ def choose_stockfish_move(
         ]
 
         if inaccuracy_candidates:
-            chosen = random.choice(
+            chosen = choose_human_candidate(
+                board,
                 inaccuracy_candidates
             )
 
@@ -943,33 +1028,32 @@ def choose_stockfish_move(
                 }
             )
 
-    # 6. NORMAL HUMAN PLAY: #1, #2, #3 within 0.40 pawns.
-    acceptable_moves = [
-        best
+    # 6. NORMAL HUMAN PLAY: every positive-evaluation candidate is
+    # eligible. MultiPV rank is only a tiny weight, so #3/#4/#5 and deeper
+    # safe choices can naturally appear. Losing/negative candidates remain
+    # excluded whenever a positive candidate exists.
+    human_safe_candidates = [
+        candidate
+        for candidate in candidates
+        if candidate["cp"] > 0
     ]
 
-    for i in range(
-        1,
-        min(
-            HUMAN_LIKE_NORMAL_MAX_RANK_INDEX,
-            len(candidates)
-        )
-    ):
-        candidate = candidates[i]
+    if not human_safe_candidates:
+        # No positive continuation exists in the MultiPV set; fall back to
+        # the existing best move rather than inventing a losing preference.
+        human_safe_candidates = [
+            best
+        ]
 
-        if (
-            abs(
-                best_cp
-                - candidate["cp"]
-            )
-            <= HUMAN_LIKE_NORMAL_MAX_CP_GAP
-        ):
-            acceptable_moves.append(
-                candidate
-            )
+    chosen = choose_human_candidate(
+        board,
+        human_safe_candidates
+    )
 
-    chosen = random.choice(
-        acceptable_moves
+    capture_note = (
+        " | HUMAN CAPTURE"
+        if board.is_capture(chosen["move"])
+        else ""
     )
 
     return (
@@ -980,9 +1064,12 @@ def choose_stockfish_move(
             "current_cp": current_advantage,
             "selected_cp": chosen["cp"],
             "reason": (
-                f"Fuzzy (#{chosen['rank'] + 1}) | "
+                f"Human Safe Fuzzy "
+                f"(#{chosen['rank'] + 1}) | "
+                f"SAFE_POOL={len(human_safe_candidates)} "
                 f"BEST={current_advantage / 100:+.2f} "
                 f"SELECTED={chosen['cp'] / 100:+.2f}"
+                f"{capture_note}"
             )
         }
     )
