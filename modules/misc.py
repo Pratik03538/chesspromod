@@ -726,12 +726,12 @@ def main():
             return 0.0
 
     def detect_new_game_button(frame):
-        """Detect the right-side New <time-control> button on the result screen.
+        """Detect the right-side New <time-control> button on the result page.
 
-        The time control text can vary (1+1, 2+1, 3+2, 5 min, ...), so only
-        the stable two-button geometry is used. The caller additionally
-        requires a large board obstruction or a chess terminal state before
-        this result-screen control is allowed to click.
+        The label may be 1+1, 2+1, 3+2, 5 min, etc. The button position is
+        stable, so detection is based on the result-page layout rather than
+        OCR/text. A green Game Review bar near the bottom is required before
+        returning the click point.
         """
         if frame is None:
             return None
@@ -739,196 +739,204 @@ def main():
         try:
             height, width = frame.shape[:2]
 
-            y1 = max(
-                0,
-                int(height * 0.28)
-            )
-            y2 = min(
-                height,
-                int(height * 0.58)
-            )
+            button_x1 = int(width * 0.46)
+            button_x2 = int(width * 0.88)
+            button_y1 = int(height * 0.32)
+            button_y2 = int(height * 0.40)
 
-            roi = frame[
-                y1:y2,
-                0:width
+            button_roi = frame[
+                button_y1:button_y2,
+                button_x1:button_x2
             ]
 
             gray = cv2.cvtColor(
-                roi,
+                button_roi,
                 cv2.COLOR_BGR2GRAY
             )
 
-            edges = cv2.Canny(
-                gray,
-                50,
-                150
+            white_fraction = float(
+                np.mean(gray > 175)
             )
 
-            contours, _ = cv2.findContours(
-                edges,
-                cv2.RETR_EXTERNAL,
-                cv2.CHAIN_APPROX_SIMPLE
+            dark_fraction = float(
+                np.mean(gray < 100)
             )
 
-            rectangles = []
-
-            for contour in contours:
-                x, y, w, h = cv2.boundingRect(
-                    contour
-                )
-
-                y += y1
-
-                if (
-                    w < int(width * 0.34)
-                    or w > int(width * 0.60)
-                    or h < int(height * 0.035)
-                    or h > int(height * 0.12)
-                ):
-                    continue
-
-                if (
-                    w / float(max(1, h))
-                    < 2.5
-                ):
-                    continue
-
-                center_x = x + (w * 0.5)
-                center_y = y + (h * 0.5)
-
-                rectangles.append(
-                    (
-                        center_x,
-                        center_y,
-                        w,
-                        h,
-                        w * h
-                    )
-                )
-
-            if len(rectangles) < 2:
+            if (
+                white_fraction < 0.015
+                or dark_fraction < 0.45
+            ):
                 return None
 
-            best_pair = None
-            best_area = -1.0
+            review_y1 = int(height * 0.79)
+            review_y2 = int(height * 0.87)
+            review_x1 = int(width * 0.03)
+            review_x2 = int(width * 0.88)
 
-            for index, left in enumerate(rectangles):
-                for right in rectangles[index + 1:]:
-                    lx, ly, lw, lh, la = left
-                    rx, ry, rw, rh, ra = right
-
-                    if lx > rx:
-                        (
-                            lx, ly, lw, lh, la,
-                            rx, ry, rw, rh, ra
-                        ) = (
-                            rx, ry, rw, rh, ra,
-                            lx, ly, lw, lh, la
-                        )
-
-                    if lx >= rx:
-                        continue
-
-                    if lx > width * 0.50:
-                        continue
-
-                    if rx < width * 0.50:
-                        continue
-
-                    if (
-                        abs(ly - ry)
-                        > height * 0.04
-                    ):
-                        continue
-
-                    height_ratio = (
-                        min(lh, rh)
-                        / max(1.0, float(max(lh, rh)))
-                    )
-
-                    if height_ratio < 0.70:
-                        continue
-
-                    area = la + ra
-
-                    if area > best_area:
-                        best_area = area
-                        best_pair = (
-                            right
-                        )
-
-            if best_pair is None:
-                return None
-
-            # A result screen also has a large Game Review-style button
-            # below the result controls. Requiring this second visual feature
-            # helps distinguish the result page from phone calls/notifications
-            # that may also contain two large buttons.
-            bottom_y1 = max(
-                0,
-                int(height * 0.82)
-            )
-            bottom_y2 = min(
-                height,
-                int(height * 0.97)
-            )
-
-            bottom_roi = gray[
-                bottom_y1:bottom_y2,
-                0:width
+            review = frame[
+                review_y1:review_y2,
+                review_x1:review_x2
             ]
 
-            bottom_edges = cv2.Canny(
-                bottom_roi,
-                50,
-                150
+            hsv = cv2.cvtColor(
+                review,
+                cv2.COLOR_BGR2HSV
             )
 
-            bottom_contours, _ = cv2.findContours(
-                bottom_edges,
-                cv2.RETR_EXTERNAL,
-                cv2.CHAIN_APPROX_SIMPLE
+            green_mask = (
+                (hsv[:, :, 0] >= 30)
+                & (hsv[:, :, 0] <= 95)
+                & (hsv[:, :, 1] >= 60)
+                & (hsv[:, :, 2] >= 70)
             )
 
-            review_button_found = False
+            green_fraction = float(
+                np.mean(green_mask)
+            )
 
-            for contour in bottom_contours:
-                bx, by, bw, bh = cv2.boundingRect(
-                    contour
-                )
-
-                by += bottom_y1
-
-                if (
-                    bw < int(width * 0.65)
-                    or bw > int(width * 0.98)
-                    or bh < int(height * 0.035)
-                    or bh > int(height * 0.11)
-                ):
-                    continue
-
-                if (
-                    bw / float(max(1, bh))
-                    < 4.0
-                ):
-                    continue
-
-                center_y = by + (bh * 0.5)
-
-                if center_y >= height * 0.82:
-                    review_button_found = True
-                    break
-
-            if not review_button_found:
+            if green_fraction < 0.035:
                 return None
 
             return (
-                int(best_pair[0]),
-                int(best_pair[1])
+                int(width * 0.67),
+                int(height * 0.355)
             )
 
         except Exception:
             return None
+
+    def wait_for_initial_match(
+        sct,
+        hwnd,
+        board_coords
+    ):
+        """Wait until an actual chess position is visible after L.
+
+        Blank board/searching/matchmaking frames never become GAME READY.
+        The helper returns only after the real initial position is visible
+        and strictly verified. Human-White first move is also accepted.
+        """
+        last_ready_key = None
+        ready_samples = 0
+
+        while True:
+            candidate_frame = capture_screen(
+                sct,
+                hwnd
+            )
+
+            if candidate_frame is None:
+                time.sleep(0.10)
+                continue
+
+            grid, _, _ = scan_board(
+                candidate_frame,
+                board_coords
+            )
+
+            detected_piece_count = sum(
+                1
+                for row in grid
+                for symbol in row
+                if symbol is not None
+            )
+
+            if detected_piece_count < 20:
+                ready_samples = 0
+                last_ready_key = None
+                time.sleep(0.10)
+                continue
+
+            start_board = chess.Board(
+                INITIAL_FEN
+            )
+
+            ready_key = None
+
+            for black_perspective in (
+                False,
+                True
+            ):
+                full_ok, _ = (
+                    full_board_state_confirmed(
+                        candidate_frame,
+                        start_board,
+                        board_coords,
+                        black_perspective
+                    )
+                )
+
+                if full_ok:
+                    ready_key = (
+                        f"{int(black_perspective)}:START"
+                    )
+                    break
+
+                if black_perspective:
+                    first_move = (
+                        detect_existing_white_first_move(
+                            candidate_frame,
+                            start_board,
+                            board_coords,
+                            black_perspective
+                        )
+                    )
+
+                    if first_move is not None:
+                        expected_board = (
+                            expected_board_after_move(
+                                start_board,
+                                first_move
+                            )
+                        )
+
+                        first_ok, _ = (
+                            full_board_state_confirmed(
+                                candidate_frame,
+                                expected_board,
+                                board_coords,
+                                black_perspective
+                            )
+                        )
+
+                        if first_ok:
+                            ready_key = (
+                                f"{int(black_perspective)}:"
+                                f"{first_move.uci()}"
+                            )
+                            break
+
+            if ready_key is None:
+                ready_samples = 0
+                last_ready_key = None
+
+                progress(
+                    "MATCH",
+                    "waiting for chess pieces / real game board",
+                    key="initial_match_wait",
+                    interval=0.50
+                )
+
+                time.sleep(0.10)
+                continue
+
+            if ready_key == last_ready_key:
+                ready_samples += 1
+            else:
+                last_ready_key = ready_key
+                ready_samples = 1
+
+            if ready_samples >= 2:
+                print(
+                    "[MATCH] Real chess board detected | "
+                    f"state={ready_key}"
+                )
+                return (
+                    candidate_frame,
+                    grid
+                )
+
+            time.sleep(0.10)
 
     # ============================================================
     # ULTIMATE_GM_BULLET.BIN — exact Colab Polyglot book behavior.
@@ -1173,7 +1181,7 @@ def main():
                         (
                             locked_frame,
                             locked_grid
-                        ) = stable_initial_scan(
+                        ) = wait_for_initial_match(
                             sct,
                             scrcpy_hwnd,
                             cached_board_coords
