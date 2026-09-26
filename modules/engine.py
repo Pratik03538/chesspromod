@@ -356,38 +356,49 @@ def choose_stockfish_move(
         board,
         candidate_list
     ):
-        """Choose a human-like candidate without making MultiPV rank dominant.
-    
-        Every candidate already passed by the caller remains eligible. Rank only
-        has a very small effect; safe captures receive a much stronger preference,
-        matching the tendency to take an available opponent piece.
+        """Choose a human-like candidate after safety filtering.
+
+        MultiPV rank is deliberately weak. Captures, checks, castling and
+        promotion receive small human-behavior preferences, while the caller
+        ensures that every candidate is position-safe.
         """
         if not candidate_list:
             return None
-    
+
         if len(candidate_list) == 1:
             return candidate_list[0]
-    
+
         weighted = []
-    
+
         for candidate in candidate_list:
-            rank = int(candidate.get("rank", 0))
-    
-            # Keep rank influence intentionally flat: #1/#2 should not dominate
-            # simply because Stockfish listed them first.
-            rank_weight = max(
-                0.90,
-                1.0 - (rank * 0.006)
+            rank = int(
+                candidate.get(
+                    "rank",
+                    0
+                )
             )
-    
+
+            # Rank is only a mild preference. This lets #3/#4/#5 and deeper
+            # safe moves appear instead of repeatedly forcing #1/#2.
+            rank_weight = max(
+                0.62,
+                1.0 / (
+                    1.0
+                    + (0.04 * rank)
+                )
+            )
+
             weight = rank_weight
             move = candidate["move"]
-    
+
+            # Humans tend to notice an available capture, especially when
+            # the captured piece is valuable. The safety floor is applied
+            # before this helper is called.
             if board.is_capture(move):
                 captured_piece = board.piece_at(
                     move.to_square
                 )
-    
+
                 if (
                     captured_piece is None
                     and board.is_en_passant(move)
@@ -401,27 +412,75 @@ def choose_stockfish_move(
                     )
                 else:
                     captured_value = 0
-    
-                capture_weight = (
-                    4.0
+
+                weight *= (
+                    3.5
                     + min(
                         captured_value,
                         900
-                    ) / 900.0 * 2.0
+                    ) / 900.0 * 2.5
                 )
-    
-                weight *= capture_weight
-    
+
+            if board.gives_check(move):
+                weight *= 1.25
+
+            if board.is_castling(move):
+                weight *= 1.10
+
+            if move.promotion is not None:
+                weight *= 1.30
+
             weighted.append(
-                (candidate, weight)
+                (
+                    candidate,
+                    weight
+                )
             )
-    
+
         return random.choices(
             [item[0] for item in weighted],
             weights=[item[1] for item in weighted],
             k=1
         )[0]
-    
+
+
+    def human_safety_floor_cp(
+        best_cp
+    ):
+        """Keep human variation inside a winning safety cushion."""
+        best_cp = int(
+            best_cp
+        )
+
+        if best_cp <= 5:
+            return 5
+
+        if best_cp < 250:
+            allowed_drop = 50
+        elif best_cp < 500:
+            allowed_drop = 80
+        elif best_cp < 800:
+            allowed_drop = 120
+        elif best_cp < 1000:
+            allowed_drop = 150
+        else:
+            allowed_drop = min(
+                250,
+                max(
+                    120,
+                    int(
+                        best_cp
+                        * 0.05
+                    )
+                )
+            )
+
+        return max(
+            5,
+            best_cp - allowed_drop
+        )
+
+
 
     if not multipv_infos:
         return (
@@ -782,11 +841,17 @@ def choose_stockfish_move(
         current_advantage >= HUMAN_LIKE_LAZY_MIN_ADVANTAGE_CP
         and current_advantage < 1000
     ):
+        lazy_floor_cp = human_safety_floor_cp(
+            best_cp
+        )
+
         acceptable_finishers = [
             candidate
             for candidate in candidates
             if (
                 candidate["cp"]
+                >= lazy_floor_cp
+                and candidate["cp"]
                 > HUMAN_LIKE_LAZY_MIN_RESULT_CP
             )
         ]
@@ -924,6 +989,17 @@ def choose_stockfish_move(
             if deep_cp <= 0:
                 deep_move = None
 
+            deep_floor_cp = human_safety_floor_cp(
+                best_cp
+            )
+
+            if (
+                current_advantage > 0
+                and deep_move is not None
+                and deep_cp < deep_floor_cp
+            ):
+                deep_move = None
+
             if deep_move is not None:
                 return (
                     deep_move,
@@ -967,6 +1043,10 @@ def choose_stockfish_move(
                 if (
                     candidate["cp"]
                     > HUMAN_LIKE_BAKWAS_MIN_RESULT_CP
+                    and candidate["cp"]
+                    >= human_safety_floor_cp(
+                        best_cp
+                    )
                 )
             ]
 
@@ -1018,6 +1098,10 @@ def choose_stockfish_move(
             if (
                 candidate["cp"]
                 > HUMAN_LIKE_INACCURACY_MIN_RESULT_CP
+                and candidate["cp"]
+                >= human_safety_floor_cp(
+                    best_cp
+                )
             )
         ]
 
@@ -1047,10 +1131,19 @@ def choose_stockfish_move(
     # eligible. MultiPV rank is only a tiny weight, so #3/#4/#5 and deeper
     # safe choices can naturally appear. Losing/negative candidates remain
     # excluded whenever a positive candidate exists.
+    human_floor_cp = human_safety_floor_cp(
+        best_cp
+    )
+
     human_safe_candidates = [
         candidate
         for candidate in candidates
-        if candidate["cp"] > 0
+        if (
+            candidate["cp"]
+            >= human_floor_cp
+            and candidate["cp"]
+            > 0
+        )
     ]
 
     if not human_safe_candidates:
@@ -1082,6 +1175,7 @@ def choose_stockfish_move(
                 f"Human Safe Fuzzy "
                 f"(#{chosen['rank'] + 1}) | "
                 f"SAFE_POOL={len(human_safe_candidates)} "
+                f"FLOOR={human_floor_cp / 100:+.2f} "
                 f"BEST={current_advantage / 100:+.2f} "
                 f"SELECTED={chosen['cp'] / 100:+.2f}"
                 f"{capture_note}"
