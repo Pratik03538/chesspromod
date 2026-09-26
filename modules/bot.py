@@ -482,9 +482,9 @@ def click_move(
         )
         return False
 
-    # Fast continuous drag with a very small natural bend.
-    # The bend is intentionally tiny so it does not turn the gesture into
-    # a slow/unstable path on scrcpy.
+    # Use one real drag gesture instead of two independent taps.
+    # This avoids the retry problem where a source square can already be
+    # selected and a second source tap would deselect it.
     sx, sy = square_screen_center(
         move.from_square,
         board_coords,
@@ -501,58 +501,27 @@ def click_move(
         screen_origin=screen_origin
     )
 
-    dx = float(tx - sx)
-    dy = float(ty - sy)
-    distance = max(
-        1.0,
-        math.hypot(dx, dy)
-    )
-
-    offset = min(
-        4.0,
-        max(
-            1.5,
-            distance * 0.022
-        )
-    )
-
-    nx = -dy / distance
-    ny = dx / distance
-
-    bend_sign = random.choice(
-        (-1.0, 1.0)
-    )
-
-    mid_x = (
-        (sx + tx) * 0.5
-        + nx * offset * bend_sign
-    )
-
-    mid_y = (
-        (sy + ty) * 0.5
-        + ny * offset * bend_sign
-    )
-
     print(
-        f"[BOT DRAG] {move.uci()} "
-        f"source=({sx},{sy}) "
-        f"mid=({int(mid_x)},{int(mid_y)}) "
-        f"target=({tx},{ty})"
+        f"[BOT CLICK] {move.uci()} "
+        f"source=({sx},{sy}) target=({tx},{ty})"
     )
 
+    # Keep the cursor away from the board before the gesture.
     user32.SetCursorPos(
         0,
         0
     )
+    time.sleep(
+        0.015
+    )
 
-    # Source.
+    # Move to source and press.
     user32.SetCursorPos(
         int(sx),
         int(sy)
     )
-
     time.sleep(
-        0.006
+        0.030
     )
 
     user32.mouse_event(
@@ -563,28 +532,18 @@ def click_move(
         0
     )
 
+    # Give scrcpy/Android enough time to register pickup before moving.
     time.sleep(
-        0.012
+        0.060
     )
 
-    # Tiny sideways bend.
-    user32.SetCursorPos(
-        int(mid_x),
-        int(mid_y)
-    )
-
-    time.sleep(
-        0.008
-    )
-
-    # Target.
+    # Drag while the left button remains down.
     user32.SetCursorPos(
         int(tx),
         int(ty)
     )
-
     time.sleep(
-        0.008
+        0.060
     )
 
     user32.mouse_event(
@@ -595,15 +554,13 @@ def click_move(
         0
     )
 
-    # Small post-release settle prevents the first verification frame from
-    # catching the piece while scrcpy is still applying the move animation.
-    time.sleep(
-        0.018
-    )
-
+    # Leave the cursor outside the board while verification runs.
     user32.SetCursorPos(
         0,
         0
+    )
+    time.sleep(
+        0.020
     )
 
     if move.promotion is not None:
@@ -634,7 +591,6 @@ def click_move(
         return promotion_ok
 
     return True
-
 
 def safe_drop_fraction(
     current_cp
