@@ -1396,7 +1396,8 @@ def main():
                                         previous_eval_white_cp=selected_previous_eval,
                                         opponent_accuracy=opponent_accuracy,
                                         opponent_sample_count=opponent_sample_count,
-                                        opponent_pressure=opponent_pressure
+                                        opponent_pressure=opponent_pressure,
+                                        engine=engine
                                     )
 
                                     opponent_pressure = False
