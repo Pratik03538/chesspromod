@@ -945,6 +945,35 @@ def choose_stockfish_move(
             best_cp
         )
 
+        # GM Lazy must stay convincingly winning while still allowing
+        # human-like variation. The old floor was based only on best_cp,
+        # which could allow roughly 1.2 pawns of drop near +9.0. Add a
+        # second floor anchored to the CURRENT advantage: about 0.70 pawn
+        # drop at +8, scaling gradually to at most 1.10 pawns before +10.
+        lazy_allowed_drop_cp = min(
+            110,
+            max(
+                70,
+                int(
+                    70
+                    + max(
+                        0,
+                        current_advantage - 800
+                    ) * 0.20
+                )
+            )
+        )
+
+        lazy_current_floor_cp = (
+            current_advantage
+            - lazy_allowed_drop_cp
+        )
+
+        lazy_floor_cp = max(
+            lazy_floor_cp,
+            lazy_current_floor_cp
+        )
+
         acceptable_finishers = [
             candidate
             for candidate in candidates
