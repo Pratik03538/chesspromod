@@ -1,8 +1,11 @@
 # Exact function source extracted from original main.py.
 
-def progress(stage, detail="", key=None, interval=PROGRESS_INTERVAL, force=False):
+def progress(stage, detail="", key=None, interval=None, force=False):
     if not VERBOSE_LOGS and stage not in {"STATE", "PROMOTION"}:
         return
+
+    if interval is None:
+        interval = PROGRESS_INTERVAL
 
     if key is None:
         key = stage
