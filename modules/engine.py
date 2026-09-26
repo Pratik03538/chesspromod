@@ -848,6 +848,16 @@ def choose_stockfish_move(
                     candidate
                 )
 
+        if current_advantage > 0:
+            positive_defense = [
+                candidate
+                for candidate in acceptable_defense
+                if candidate["cp"] > 0
+            ]
+
+            if positive_defense:
+                acceptable_defense = positive_defense
+
         chosen = choose_human_candidate(
             board,
             acceptable_defense
@@ -910,21 +920,24 @@ def choose_stockfish_move(
             if deep_cp is None:
                 deep_cp = best_cp
 
-            return (
-                deep_move,
-                deep_result,
-                {
-                    "rank": 0,
-                    "current_cp": current_advantage,
-                    "selected_cp": int(deep_cp),
-                    "reason": (
-                        "GREAT MOVE (Deep Calc) | "
-                        f"BEST={current_advantage / 100:+.2f} "
-                        f"DEEP={deep_cp / 100:+.2f}"
-                    )
-                }
-            )
+            if deep_cp <= 0:
+                deep_move = None
 
+            if deep_move is not None:
+                    return (
+                    deep_move,
+                    deep_result,
+                    {
+                        "rank": 0,
+                        "current_cp": current_advantage,
+                        "selected_cp": int(deep_cp),
+                        "reason": (
+                            "GREAT MOVE (Deep Calc) | "
+                            f"BEST={current_advantage / 100:+.2f} "
+                            f"DEEP={deep_cp / 100:+.2f}"
+                        )
+                    }
+    
     # 4. BAKWAS: +5.00 to +8.00.
     if (
         HUMAN_LIKE_BAKWAS_MIN_ADVANTAGE_CP
