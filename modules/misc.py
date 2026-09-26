@@ -797,9 +797,11 @@ def main():
             if green_fraction < 0.035:
                 return None
 
+            # Center of the right-side New <time-control> button.
+            # The text can vary, but the button position is stable.
             return (
-                int(width * 0.67),
-                int(height * 0.355)
+                int(width * 0.735),
+                int(height * 0.392)
             )
 
         except Exception:
