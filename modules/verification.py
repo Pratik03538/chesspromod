@@ -780,11 +780,7 @@ def verify_bot_move(
             # motion map proves that no unrelated square changed, and exact
             # source/destination classification proves the requested piece moved.
             # Captures/castling/promotion still get the strict full-board check.
-            strict_full = (
-                board.is_capture(move)
-                or board.is_castling(move)
-                or move.promotion is not None
-            )
+            strict_full = True
 
             if not strict_full:
                 return True, after_frame, reason
