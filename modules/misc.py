@@ -1351,7 +1351,7 @@ def main():
                                         board,
                                         chess.engine.Limit(
                                             depth=STOCKFISH_DEPTH,
-                                            time=STOCKFISH_TIME
+                                            time=HUMAN_LIKE_EVAL_TIME
                                         ),
                                         multipv=TRAINING_MULTI_PV
                                     )
