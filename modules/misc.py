@@ -614,6 +614,108 @@ def main():
     next_human_best_uci = None
     opponent_pressure = False
 
+    # Screen-interruption guard. This is session state and does not alter
+    # the chess board/grid state. A large unexpected visual change inside
+    # the locked board pauses all gameplay until the board is visible again.
+    screen_interrupted = False
+    screen_interrupt_bad_samples = 0
+    screen_interrupt_clear_samples = 0
+    screen_interrupt_fraction = 0.0
+
+    def board_interruption_fraction(
+        reference_frame,
+        current_frame,
+        board_coords
+    ):
+        if (
+            reference_frame is None
+            or current_frame is None
+            or board_coords is None
+        ):
+            return 0.0
+
+        try:
+            x, y, w, h = board_coords
+            x1 = max(0, int(x))
+            y1 = max(0, int(y))
+            x2 = min(
+                reference_frame.shape[1],
+                int(x + w)
+            )
+            y2 = min(
+                reference_frame.shape[0],
+                int(y + h)
+            )
+
+            if (
+                x2 <= x1
+                or y2 <= y1
+                or x2 > current_frame.shape[1]
+                or y2 > current_frame.shape[0]
+            ):
+                return 0.0
+
+            size = 128
+
+            before = cv2.resize(
+                reference_frame[
+                    y1:y2,
+                    x1:x2
+                ],
+                (size, size),
+                interpolation=cv2.INTER_AREA
+            )
+
+            current = cv2.resize(
+                current_frame[
+                    y1:y2,
+                    x1:x2
+                ],
+                (size, size),
+                interpolation=cv2.INTER_AREA
+            )
+
+            difference = cv2.absdiff(
+                before,
+                current
+            )
+
+            pixel_diff = np.max(
+                difference,
+                axis=2
+            )
+
+            # Estimate the board area occupied by unexpected visual content.
+            # A normal chess move changes only a small part of the board;
+            # notifications/call overlays covering >10% produce a much larger
+            # changed-area fraction.
+            changed_mask = (
+                pixel_diff >= 20
+            ).astype(
+                np.uint8
+            )
+
+            kernel = np.ones(
+                (3, 3),
+                np.uint8
+            )
+
+            changed_mask = cv2.morphologyEx(
+                changed_mask,
+                cv2.MORPH_OPEN,
+                kernel
+            )
+
+            return float(
+                np.count_nonzero(
+                    changed_mask
+                )
+                / changed_mask.size
+            )
+
+        except Exception:
+            return 0.0
+
     # ============================================================
     # ULTIMATE_GM_BULLET.BIN — exact Colab Polyglot book behavior.
     # The book is checked on every Stockfish turn while we remain
@@ -680,6 +782,54 @@ def main():
 
                 display_frame = frame.copy()
 
+                if (
+                    game_ready
+                    and grid_locked
+                    and cached_board_coords
+                    and baseline_frame is not None
+                ):
+                    screen_interrupt_fraction = (
+                        board_interruption_fraction(
+                            baseline_frame,
+                            frame,
+                            cached_board_coords
+                        )
+                    )
+
+                    if screen_interrupt_fraction > 0.10:
+                        screen_interrupt_bad_samples += 1
+                        screen_interrupt_clear_samples = 0
+
+                        if (
+                            screen_interrupt_bad_samples >= 2
+                            and not screen_interrupted
+                        ):
+                            screen_interrupted = True
+                            print(
+                                "[SCREEN GUARD] PAUSED | "
+                                f"unexpected board obstruction="
+                                f"{screen_interrupt_fraction * 100.0:.1f}% "
+                                "| no move/click will be issued"
+                            )
+                    elif screen_interrupted:
+                        screen_interrupt_bad_samples = 0
+                        screen_interrupt_clear_samples += 1
+
+                        if screen_interrupt_clear_samples >= 3:
+                            screen_interrupted = False
+                            screen_interrupt_clear_samples = 0
+                            print(
+                                "[SCREEN GUARD] RESUMED | "
+                                "board visibility restored"
+                            )
+                    else:
+                        screen_interrupt_bad_samples = 0
+                        screen_interrupt_clear_samples = 0
+                else:
+                    screen_interrupt_fraction = 0.0
+                    screen_interrupt_bad_samples = 0
+                    screen_interrupt_clear_samples = 0
+
                 if key == ord("r"):
                     height, width = frame.shape[:2]
 
@@ -713,6 +863,10 @@ def main():
                     grid_locked = False
                     game_ready = False
                     baseline_frame = None
+                    screen_interrupted = False
+                    screen_interrupt_bad_samples = 0
+                    screen_interrupt_clear_samples = 0
+                    screen_interrupt_fraction = 0.0
                     analysis_state = None
                     out_of_book = False
 
@@ -1126,10 +1280,17 @@ def main():
                             f"{last_scan_time_ms:.1f}ms"
                         )
 
+                    if screen_interrupted:
+                        status = (
+                            "PAUSED - SCREEN OBSTRUCTED | "
+                            f"{screen_interrupt_fraction * 100.0:.1f}% BOARD"
+                        )
+
                 if (
                     game_ready
                     and grid_locked
                     and stockfish_color is not None
+                    and not screen_interrupted
                 ):
                     if (
                         board.turn == human_color
@@ -1689,6 +1850,35 @@ def main():
                                     scrcpy_hwnd
                                 )
 
+                                if (
+                                    not verified
+                                    and before_frame is not None
+                                    and baseline_frame is not None
+                                ):
+                                    immediate_obstruction_fraction = (
+                                        board_interruption_fraction(
+                                            baseline_frame,
+                                            before_frame,
+                                            cached_board_coords
+                                        )
+                                    )
+
+                                    if immediate_obstruction_fraction > 0.10:
+                                        print(
+                                            "[SCREEN GUARD] PAUSED BEFORE CLICK | "
+                                            f"unexpected board obstruction="
+                                            f"{immediate_obstruction_fraction * 100.0:.1f}% "
+                                            "| pending move remains uncommitted"
+                                        )
+                                        screen_interrupted = True
+                                        screen_interrupt_bad_samples = 2
+                                        screen_interrupt_clear_samples = 0
+                                        screen_interrupt_fraction = (
+                                            immediate_obstruction_fraction
+                                        )
+                                        last_bot_position_key = position_key
+                                        continue
+
                                 if before_frame is None and not verified:
                                     last_bot_position_key = (
                                         position_key
@@ -1917,6 +2107,14 @@ def main():
                                     )
 
                                 if not verified:
+                                    if screen_interrupted:
+                                        print(
+                                            "[SCREEN GUARD] CLICK BLOCKED | "
+                                            "screen interruption active"
+                                        )
+                                        last_bot_position_key = position_key
+                                        continue
+
                                     print(
                                         "[VALIDATION] PRE-CLICK PASS | "
                                         "physical board matches internal board 64/64"
