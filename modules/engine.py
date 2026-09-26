@@ -459,7 +459,7 @@ def choose_stockfish_move(
                 selected["info"],
                 {
                     "rank": selected["rank"],
-                    "current_cp": best_cp,
+                    "current_cp": current_advantage,
                     "selected_cp": selected["cp"],
                     "reason": (
                         f"MATE FORCE | "
@@ -673,11 +673,38 @@ def choose_stockfish_move(
     # ================================================================
     # EXACT HUMAN-LIKE PLAYING LOGIC
     # Based directly on the supplied Colab get_dynamic_human_move().
-    # Candidate scores are already from the mover's point of view.
+    #
+    # In the Colab code, current_advantage comes from a separate 0.1s
+    # evaluation, while top_score comes from the MultiPV list. Preserve
+    # that distinction here as well.
     # ================================================================
+    current_advantage = best_cp
+
+    if engine is not None:
+        current_eval_info = engine.analyse(
+            board,
+            chess.engine.Limit(
+                time=HUMAN_LIKE_EVAL_TIME
+            )
+        )
+        current_eval_score = current_eval_info.get(
+            "score"
+        )
+
+        if current_eval_score is not None:
+            current_eval = current_eval_score.pov(
+                mover
+            ).score(
+                mate_score=100000
+            )
+
+            if current_eval is not None:
+                current_advantage = int(
+                    current_eval
+                )
 
     # 1. GM LAZY CONVERSION: +8.00 or better.
-    if best_cp >= HUMAN_LIKE_LAZY_MIN_ADVANTAGE_CP:
+    if current_advantage >= HUMAN_LIKE_LAZY_MIN_ADVANTAGE_CP:
         acceptable_finishers = [best]
 
         for i in range(
@@ -709,14 +736,14 @@ def choose_stockfish_move(
                 "reason": (
                     f"GM Lazy Conversion "
                     f"(#{chosen['rank'] + 1}) | "
-                    f"BEST={best_cp / 100:+.2f} "
+                    f"BEST={current_advantage / 100:+.2f} "
                     f"SELECTED={chosen['cp'] / 100:+.2f}"
                 )
             }
         )
 
     # 2. EMERGENCY PULL-UP: below +1.50.
-    if best_cp < HUMAN_LIKE_PULLUP_MAX_ADVANTAGE_CP:
+    if current_advantage < HUMAN_LIKE_PULLUP_MAX_ADVANTAGE_CP:
         acceptable_defense = [best]
 
         for i in range(
@@ -753,7 +780,7 @@ def choose_stockfish_move(
                 "reason": (
                     f"Pull-Up Mode "
                     f"(#{chosen['rank'] + 1}) | "
-                    f"BEST={best_cp / 100:+.2f} "
+                    f"BEST={current_advantage / 100:+.2f} "
                     f"SELECTED={chosen['cp'] / 100:+.2f}"
                 )
             }
@@ -809,7 +836,7 @@ def choose_stockfish_move(
                     "selected_cp": int(deep_cp),
                     "reason": (
                         "GREAT MOVE (Deep Calc) | "
-                        f"BEST={best_cp / 100:+.2f} "
+                        f"BEST={current_advantage / 100:+.2f} "
                         f"DEEP={deep_cp / 100:+.2f}"
                     )
                 }
@@ -860,7 +887,7 @@ def choose_stockfish_move(
                         "reason": (
                             f"BAKWAS MOVE "
                             f"(Engine #{chosen['rank'] + 1}) | "
-                            f"BEST={best_cp / 100:+.2f} "
+                            f"BEST={current_advantage / 100:+.2f} "
                             f"SELECTED={chosen['cp'] / 100:+.2f}"
                         )
                     }
@@ -910,7 +937,7 @@ def choose_stockfish_move(
                     "reason": (
                         f"INACCURACY "
                         f"(Engine #{chosen['rank'] + 1}) | "
-                        f"BEST={best_cp / 100:+.2f} "
+                        f"BEST={current_advantage / 100:+.2f} "
                         f"SELECTED={chosen['cp'] / 100:+.2f}"
                     )
                 }
@@ -954,7 +981,7 @@ def choose_stockfish_move(
             "selected_cp": chosen["cp"],
             "reason": (
                 f"Fuzzy (#{chosen['rank'] + 1}) | "
-                f"BEST={best_cp / 100:+.2f} "
+                f"BEST={current_advantage / 100:+.2f} "
                 f"SELECTED={chosen['cp'] / 100:+.2f}"
             )
         }
