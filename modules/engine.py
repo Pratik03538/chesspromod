@@ -459,7 +459,7 @@ def choose_stockfish_move(
                 selected["info"],
                 {
                     "rank": selected["rank"],
-                    "current_cp": current_advantage,
+                    "current_cp": best_cp,
                     "selected_cp": selected["cp"],
                     "reason": (
                         f"MATE FORCE | "
@@ -775,7 +775,7 @@ def choose_stockfish_move(
             chosen["info"],
             {
                 "rank": chosen["rank"],
-                "current_cp": best_cp,
+                "current_cp": current_advantage,
                 "selected_cp": chosen["cp"],
                 "reason": (
                     f"Pull-Up Mode "
@@ -832,7 +832,7 @@ def choose_stockfish_move(
                 deep_result,
                 {
                     "rank": 0,
-                    "current_cp": best_cp,
+                    "current_cp": current_advantage,
                     "selected_cp": int(deep_cp),
                     "reason": (
                         "GREAT MOVE (Deep Calc) | "
@@ -882,7 +882,7 @@ def choose_stockfish_move(
                     chosen["info"],
                     {
                         "rank": chosen["rank"],
-                        "current_cp": best_cp,
+                        "current_cp": current_advantage,
                         "selected_cp": chosen["cp"],
                         "reason": (
                             f"BAKWAS MOVE "
@@ -932,7 +932,7 @@ def choose_stockfish_move(
                 chosen["info"],
                 {
                     "rank": chosen["rank"],
-                    "current_cp": best_cp,
+                    "current_cp": current_advantage,
                     "selected_cp": chosen["cp"],
                     "reason": (
                         f"INACCURACY "
@@ -977,7 +977,7 @@ def choose_stockfish_move(
         chosen["info"],
         {
             "rank": chosen["rank"],
-            "current_cp": best_cp,
+            "current_cp": current_advantage,
             "selected_cp": chosen["cp"],
             "reason": (
                 f"Fuzzy (#{chosen['rank'] + 1}) | "
