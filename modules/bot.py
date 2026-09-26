@@ -518,8 +518,8 @@ def click_move(
 
     time.sleep(
         random.uniform(
-            TOUCH_SOURCE_PAUSE_MIN,
-            TOUCH_SOURCE_PAUSE_MAX
+            0.010,
+            0.022
         )
     )
 
@@ -530,8 +530,8 @@ def click_move(
 
     time.sleep(
         random.uniform(
-            TOUCH_TARGET_SETTLE_MIN,
-            TOUCH_TARGET_SETTLE_MAX
+            0.002,
+            0.008
         )
     )
 
