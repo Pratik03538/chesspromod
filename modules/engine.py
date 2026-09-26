@@ -378,37 +378,38 @@ def choose_stockfish_move(
                 )
             )
 
-            # Rank is only a weak preference. Safe #3/#4/#5/#6
-            # candidates should have a real chance instead of repeatedly
-            # forcing #1/#2.
+            # MultiPV rank is deliberately almost neutral. The point is
+            # not to imitate Stockfish's ordering; it is to let a safe human
+            # choice emerge from several reasonable moves.
             rank_weight = max(
-                0.78,
+                0.94,
                 1.0 / (
                     1.0
-                    + (0.025 * rank)
+                    + (0.015 * rank)
                 )
             )
 
-            # Keep evaluation quality relevant, but deliberately weaker than
-            # human feature preferences. Safety has already been enforced by
-            # the caller before this helper is reached.
+            # Keep engine quality relevant, but make it much weaker than
+            # human-behavior features. A move that is 0.5-1.0 pawns below
+            # the best safe line can still be chosen when the position allows
+            # it.
             pool_best_cp = max(
                 item.get("cp", 0)
                 for item in candidate_list
             )
-            quality_gap = max(
-                0,
-                pool_best_cp - int(
+            quality_gap = abs(
+                pool_best_cp
+                - int(
                     candidate.get("cp", 0)
                 )
             )
             quality_weight = (
-                0.82
+                0.93
                 + (
-                    0.38
+                    0.12
                     / (
                         1.0
-                        + quality_gap / 120.0
+                        + quality_gap / 150.0
                     )
                 )
             )
@@ -450,13 +451,53 @@ def choose_stockfish_move(
                 )
 
             if board.gives_check(move):
-                weight *= 1.25
+                weight *= 1.22
 
             if board.is_castling(move):
-                weight *= 1.10
+                weight *= 1.18
 
             if move.promotion is not None:
-                weight *= 1.30
+                weight *= 1.28
+
+            # Natural human development gets a small preference. These are
+            # deliberately modest so tactical/evaluative safety still wins.
+            moving_piece = board.piece_at(
+                move.from_square
+            )
+
+            if moving_piece is not None:
+                if moving_piece.piece_type in (
+                    chess.KNIGHT,
+                    chess.BISHOP
+                ):
+                    home_rank = (
+                        0
+                        if moving_piece.color == chess.WHITE
+                        else 7
+                    )
+
+                    if chess.square_rank(
+                        move.from_square
+                    ) == home_rank:
+                        weight *= 1.10
+
+                if (
+                    moving_piece.piece_type
+                    == chess.PAWN
+                    and move.from_square // 8 in (1, 6)
+                    and chess.square_file(
+                        move.from_square
+                    ) in (
+                        2,
+                        3,
+                        4,
+                        5
+                    )
+                ):
+                    weight *= 1.06
+
+                if moving_piece.piece_type == chess.KING:
+                    weight *= 0.92
 
             weighted.append(
                 (
@@ -475,21 +516,29 @@ def choose_stockfish_move(
     def human_safety_floor_cp(
         best_cp
     ):
-        """Keep human variation inside a winning safety cushion."""
+        """Keep human variation close to the best line on either side."""
         best_cp = int(
             best_cp
         )
 
-        if best_cp <= 5:
-            return 5
+        # The previous implementation returned +0.05 for every position
+        # whose best score was <= +0.05. That accidentally discarded every
+        # negative MultiPV candidate when the side to move was behind.
+        #
+        # Safety should be relative to the best available move, not relative
+        # to zero. If all reasonable moves are negative, a human can still
+        # choose a slightly worse negative move without throwing the game.
+        magnitude = abs(
+            best_cp
+        )
 
-        if best_cp < 250:
+        if magnitude < 250:
             allowed_drop = 50
-        elif best_cp < 500:
+        elif magnitude < 500:
             allowed_drop = 80
-        elif best_cp < 800:
+        elif magnitude < 800:
             allowed_drop = 120
-        elif best_cp < 1000:
+        elif magnitude < 1000:
             allowed_drop = 150
         else:
             allowed_drop = min(
@@ -497,16 +546,13 @@ def choose_stockfish_move(
                 max(
                     120,
                     int(
-                        best_cp
+                        magnitude
                         * 0.05
                     )
                 )
             )
 
-        return max(
-            5,
-            best_cp - allowed_drop
-        )
+        return best_cp - allowed_drop
 
 
 
@@ -949,7 +995,6 @@ def choose_stockfish_move(
             if (
                 candidate["rank"] <= low_rank_cap
                 and candidate["cp"] >= low_floor_cp
-                and candidate["cp"] > 0
             )
         ]
 
