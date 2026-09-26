@@ -462,7 +462,9 @@ def click_move(
     black_perspective,
     scrcpy_hwnd,
     sct=None,
-    promotion_color=None
+    promotion_color=None,
+    before_frame=None,
+    premove=False
 ):
     if not focus_scrcpy(
         scrcpy_hwnd
@@ -482,9 +484,9 @@ def click_move(
         )
         return False
 
-    # Use one real drag gesture instead of two independent taps.
-    # This avoids the retry problem where a source square can already be
-    # selected and a second source tap would deselect it.
+    # Touch-to-touch: source tap, short human-like pause, target tap.
+    # There is intentionally no mouse-down while moving between squares,
+    # so the piece is never dragged in a straight cursor line.
     sx, sy = square_screen_center(
         move.from_square,
         board_coords,
@@ -501,66 +503,50 @@ def click_move(
         screen_origin=screen_origin
     )
 
+    gesture_name = "PREMOVE" if premove else "TOUCH"
     print(
-        f"[BOT CLICK] {move.uci()} "
+        f"[BOT {gesture_name}] {move.uci()} "
         f"source=({sx},{sy}) target=({tx},{ty})"
     )
 
-    # Keep the cursor away from the board before the gesture.
     user32.SetCursorPos(
         0,
         0
     )
+
+    # Source square tap.
+    left_click_screen(
+        sx,
+        sy
+    )
+
+    # A very short randomized pause gives the mobile UI time to register
+    # the selected square without adding noticeable bullet latency.
     time.sleep(
-        0.015
+        random.uniform(
+            TOUCH_SOURCE_PAUSE_MIN,
+            TOUCH_SOURCE_PAUSE_MAX
+        )
     )
 
-    # Move to source and press.
-    user32.SetCursorPos(
-        int(sx),
-        int(sy)
+    # Target square tap. For a supported chess premove UI this same pair of
+    # taps queues the move while the opponent is thinking; otherwise the
+    # normal path behaves as a regular source/target tap sequence.
+    left_click_screen(
+        tx,
+        ty
     )
+
     time.sleep(
-        0.030
+        random.uniform(
+            TOUCH_TARGET_SETTLE_MIN,
+            TOUCH_TARGET_SETTLE_MAX
+        )
     )
 
-    user32.mouse_event(
-        MOUSEEVENTF_LEFTDOWN,
-        0,
-        0,
-        0,
-        0
-    )
-
-    # Give scrcpy/Android enough time to register pickup before moving.
-    time.sleep(
-        0.060
-    )
-
-    # Drag while the left button remains down.
-    user32.SetCursorPos(
-        int(tx),
-        int(ty)
-    )
-    time.sleep(
-        0.060
-    )
-
-    user32.mouse_event(
-        MOUSEEVENTF_LEFTUP,
-        0,
-        0,
-        0,
-        0
-    )
-
-    # Leave the cursor outside the board while verification runs.
     user32.SetCursorPos(
         0,
         0
-    )
-    time.sleep(
-        0.020
     )
 
     if move.promotion is not None:
@@ -591,6 +577,7 @@ def click_move(
         return promotion_ok
 
     return True
+
 
 def safe_drop_fraction(
     current_cp
