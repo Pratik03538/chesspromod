@@ -851,6 +851,68 @@ def main():
             if best_pair is None:
                 return None
 
+            # A result screen also has a large Game Review-style button
+            # below the result controls. Requiring this second visual feature
+            # helps distinguish the result page from phone calls/notifications
+            # that may also contain two large buttons.
+            bottom_y1 = max(
+                0,
+                int(height * 0.82)
+            )
+            bottom_y2 = min(
+                height,
+                int(height * 0.97)
+            )
+
+            bottom_roi = gray[
+                bottom_y1:bottom_y2,
+                0:width
+            ]
+
+            bottom_edges = cv2.Canny(
+                bottom_roi,
+                50,
+                150
+            )
+
+            bottom_contours, _ = cv2.findContours(
+                bottom_edges,
+                cv2.RETR_EXTERNAL,
+                cv2.CHAIN_APPROX_SIMPLE
+            )
+
+            review_button_found = False
+
+            for contour in bottom_contours:
+                bx, by, bw, bh = cv2.boundingRect(
+                    contour
+                )
+
+                by += bottom_y1
+
+                if (
+                    bw < int(width * 0.65)
+                    or bw > int(width * 0.98)
+                    or bh < int(height * 0.035)
+                    or bh > int(height * 0.11)
+                ):
+                    continue
+
+                if (
+                    bw / float(max(1, bh))
+                    < 4.0
+                ):
+                    continue
+
+                center_y = by + (bh * 0.5)
+
+                if center_y >= height * 0.82:
+                    review_button_found = True
+                    break
+
+            if not review_button_found:
+                return None
+
             return (
                 int(best_pair[0]),
                 int(best_pair[1])
