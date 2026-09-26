@@ -622,6 +622,15 @@ def main():
     screen_interrupt_clear_samples = 0
     screen_interrupt_fraction = 0.0
 
+    awaiting_new_match = False
+    new_match_button_stable = 0
+    new_match_button_center = None
+    last_new_match_click = 0.0
+    next_new_match_scan = 0.0
+    new_match_start_stable = 0
+    new_match_start_key = None
+    new_match_scan_ms = 0.0
+
     def board_interruption_fraction(
         reference_frame,
         current_frame,
@@ -716,6 +725,140 @@ def main():
         except Exception:
             return 0.0
 
+    def detect_new_game_button(frame):
+        """Detect the right-side New <time-control> button on the result screen.
+
+        The time control text can vary (1+1, 2+1, 3+2, 5 min, ...), so only
+        the stable two-button geometry is used. The caller additionally
+        requires a large board obstruction or a chess terminal state before
+        this result-screen control is allowed to click.
+        """
+        if frame is None:
+            return None
+
+        try:
+            height, width = frame.shape[:2]
+
+            y1 = max(
+                0,
+                int(height * 0.28)
+            )
+            y2 = min(
+                height,
+                int(height * 0.58)
+            )
+
+            roi = frame[
+                y1:y2,
+                0:width
+            ]
+
+            gray = cv2.cvtColor(
+                roi,
+                cv2.COLOR_BGR2GRAY
+            )
+
+            edges = cv2.Canny(
+                gray,
+                50,
+                150
+            )
+
+            contours, _ = cv2.findContours(
+                edges,
+                cv2.RETR_EXTERNAL,
+                cv2.CHAIN_APPROX_SIMPLE
+            )
+
+            rectangles = []
+
+            for contour in contours:
+                x, y, w, h = cv2.boundingRect(
+                    contour
+                )
+
+                y += y1
+
+                if (
+                    w < int(width * 0.34)
+                    or w > int(width * 0.60)
+                    or h < int(height * 0.035)
+                    or h > int(height * 0.12)
+                ):
+                    continue
+
+                if (
+                    w / float(max(1, h))
+                    < 2.5
+                ):
+                    continue
+
+                center_x = x + (w * 0.5)
+                center_y = y + (h * 0.5)
+
+                rectangles.append(
+                    (
+                        center_x,
+                        center_y,
+                        w,
+                        h,
+                        w * h
+                    )
+                )
+
+            if len(rectangles) < 2:
+                return None
+
+            best_pair = None
+            best_area = -1.0
+
+            for index, left in enumerate(rectangles):
+                for right in rectangles[index + 1:]:
+                    lx, ly, lw, lh, la = left
+                    rx, ry, rw, rh, ra = right
+
+                    if lx >= rx:
+                        continue
+
+                    if lx > width * 0.50:
+                        continue
+
+                    if rx < width * 0.50:
+                        continue
+
+                    if (
+                        abs(ly - ry)
+                        > height * 0.04
+                    ):
+                        continue
+
+                    height_ratio = (
+                        min(lh, rh)
+                        / max(1.0, float(max(lh, rh)))
+                    )
+
+                    if height_ratio < 0.70:
+                        continue
+
+                    area = la + ra
+
+                    if area > best_area:
+                        best_area = area
+                        best_pair = (
+                            right
+                        )
+
+            if best_pair is None:
+                return None
+
+            return (
+                int(best_pair[0]),
+                int(best_pair[1])
+            )
+
+        except Exception:
+            return None
+
     # ============================================================
     # ULTIMATE_GM_BULLET.BIN — exact Colab Polyglot book behavior.
     # The book is checked on every Stockfish turn while we remain
@@ -787,6 +930,7 @@ def main():
                     and grid_locked
                     and cached_board_coords
                     and baseline_frame is not None
+                    and not awaiting_new_match
                 ):
                     screen_interrupt_fraction = (
                         board_interruption_fraction(
@@ -863,6 +1007,14 @@ def main():
                     grid_locked = False
                     game_ready = False
                     baseline_frame = None
+                    awaiting_new_match = False
+                    new_match_button_stable = 0
+                    new_match_button_center = None
+                    last_new_match_click = 0.0
+                    next_new_match_scan = 0.0
+                    new_match_start_stable = 0
+                    new_match_start_key = None
+                    new_match_scan_ms = 0.0
                     screen_interrupted = False
                     screen_interrupt_bad_samples = 0
                     screen_interrupt_clear_samples = 0
@@ -938,6 +1090,13 @@ def main():
                     grid_locked = not grid_locked
 
                     if grid_locked:
+                        awaiting_new_match = False
+                        new_match_button_stable = 0
+                        new_match_button_center = None
+                        new_match_start_stable = 0
+                        new_match_start_key = None
+                        new_match_scan_ms = 0.0
+
                         clear_runtime_caches()
 
                         (
@@ -1244,13 +1403,302 @@ def main():
                             )
                         )
 
+                # ============================================================
+                # RESULT SCREEN -> NEW MATCH LIFECYCLE
+                # ============================================================
+                if (
+                    grid_locked
+                    and cached_board_coords
+                    and not awaiting_new_match
+                ):
+                    result_button = detect_new_game_button(
+                        frame
+                    )
+
+                    if result_button is not None:
+                        result_obstruction = 0.0
+
+                        if baseline_frame is not None:
+                            result_obstruction = (
+                                board_interruption_fraction(
+                                    baseline_frame,
+                                    frame,
+                                    cached_board_coords
+                                )
+                            )
+
+                        result_screen = (
+                            board.is_game_over()
+                            or result_obstruction > 0.10
+                        )
+
+                        if result_screen:
+                            button_changed = (
+                                new_match_button_center is None
+                                or (
+                                    abs(
+                                        result_button[0]
+                                        - new_match_button_center[0]
+                                    )
+                                    > frame.shape[1] * 0.04
+                                )
+                                or (
+                                    abs(
+                                        result_button[1]
+                                        - new_match_button_center[1]
+                                    )
+                                    > frame.shape[0] * 0.04
+                                )
+                            )
+
+                            if button_changed:
+                                new_match_button_center = result_button
+                                new_match_button_stable = 1
+                            else:
+                                new_match_button_stable += 1
+
+                            if new_match_button_stable >= 2:
+                                origin = get_scrcpy_screen_origin(
+                                    scrcpy_hwnd
+                                )
+
+                                if (
+                                    origin is not None
+                                    and focus_scrcpy(scrcpy_hwnd)
+                                ):
+                                    click_x = (
+                                        origin[0]
+                                        + result_button[0]
+                                    )
+                                    click_y = (
+                                        origin[1]
+                                        + result_button[1]
+                                    )
+
+                                    left_click_screen(
+                                        click_x,
+                                        click_y
+                                    )
+
+                                    awaiting_new_match = True
+                                    game_ready = False
+                                    cached_board_grid = None
+                                    baseline_frame = None
+                                    screen_interrupted = False
+                                    screen_interrupt_bad_samples = 0
+                                    screen_interrupt_clear_samples = 0
+                                    screen_interrupt_fraction = 0.0
+
+                                    new_match_button_stable = 0
+                                    new_match_button_center = None
+                                    last_new_match_click = time.perf_counter()
+                                    next_new_match_scan = (
+                                        last_new_match_click
+                                        + 0.50
+                                    )
+                                    new_match_start_stable = 0
+                                    new_match_start_key = None
+                                    new_match_scan_ms = 0.0
+
+                                    print(
+                                        "[MATCH] Result screen detected | "
+                                        "clicked right-side New <time-control> button"
+                                    )
+
+                # ============================================================
+                # MATCHMAKING -> FRESH GAME DETECTION
+                # ============================================================
+                if (
+                    awaiting_new_match
+                    and grid_locked
+                    and cached_board_coords
+                ):
+                    now = time.perf_counter()
+
+                    if now >= next_new_match_scan:
+                        next_new_match_scan = (
+                            now + 0.25
+                        )
+
+                        fresh_grid, fresh_confidence, fresh_scan_ms = (
+                            scan_board(
+                                frame,
+                                cached_board_coords
+                            )
+                        )
+
+                        new_match_scan_ms = fresh_scan_ms
+
+                        fresh_board = chess.Board(
+                            INITIAL_FEN
+                        )
+
+                        fresh_black_perspective = (
+                            detect_board_orientation(
+                                fresh_grid,
+                                fresh_board
+                            )
+                        )
+
+                        fresh_stockfish_color = (
+                            detect_bottom_stockfish_color(
+                                fresh_black_perspective
+                            )
+                        )
+
+                        fresh_human_color = (
+                            chess.BLACK
+                            if fresh_stockfish_color == chess.WHITE
+                            else chess.WHITE
+                        )
+
+                        fresh_start_verified = False
+                        fresh_first_move = None
+                        fresh_start_key = None
+
+                        # Exact untouched starting position.
+                        fresh_initial_ok, _ = (
+                            full_board_state_confirmed(
+                                frame,
+                                fresh_board,
+                                cached_board_coords,
+                                fresh_black_perspective
+                            )
+                        )
+
+                        if fresh_initial_ok:
+                            fresh_start_verified = True
+                            fresh_start_key = (
+                                f"{int(fresh_black_perspective)}:START"
+                            )
+
+                        # Human-White may already have made the first move
+                        # before this polling frame arrived. Reuse the existing
+                        # first-move detector and its strict physical check.
+                        elif fresh_human_color == chess.WHITE:
+                            fresh_first_move = (
+                                detect_existing_white_first_move(
+                                    frame,
+                                    fresh_board,
+                                    cached_board_coords,
+                                    fresh_black_perspective
+                                )
+                            )
+
+                            if fresh_first_move is not None:
+                                fresh_start_verified = True
+                                fresh_start_key = (
+                                    f"{int(fresh_black_perspective)}:"
+                                    f"{fresh_first_move.uci()}"
+                                )
+
+                        if fresh_start_verified:
+                            if fresh_start_key == new_match_start_key:
+                                new_match_start_stable += 1
+                            else:
+                                new_match_start_key = fresh_start_key
+                                new_match_start_stable = 1
+
+                            if new_match_start_stable >= 2:
+                                board = fresh_board
+
+                                visual_black_perspective = (
+                                    fresh_black_perspective
+                                )
+
+                                stockfish_color = (
+                                    fresh_stockfish_color
+                                )
+
+                                human_color = (
+                                    fresh_human_color
+                                )
+
+                                cached_board_grid = fresh_grid
+                                baseline_frame = frame
+
+                                if fresh_first_move is not None:
+                                    board.push(
+                                        fresh_first_move
+                                    )
+
+                                awaiting_new_match = False
+                                game_ready = True
+
+                                out_of_book = False
+                                analysis_state = None
+                                opponent_match_history.clear()
+                                next_human_best_uci = None
+                                opponent_pressure = False
+                                last_bot_position_key = None
+                                pending_bot_moves.clear()
+                                pending_recovered_human = None
+
+                                stockfish_moves_since_buffer = 0
+                                next_buffer_after = random.randint(
+                                    RANDOM_BUFFER_MOVE_MIN,
+                                    RANDOM_BUFFER_MOVE_MAX
+                                )
+
+                                _advantage_progress_target_cp = None
+                                _advantage_progress_hold_moves = 0
+                                _advantage_progress_hold_limit = random.randint(
+                                    HUMAN_ADVANTAGE_HOLD_MIN_MOVES,
+                                    HUMAN_ADVANTAGE_HOLD_MAX_MOVES
+                                )
+                                _advantage_progress_side = None
+
+                                next_main_turn_rescan = (
+                                    time.perf_counter()
+                                    + TURN_RESCAN_INTERVAL
+                                )
+
+                                screen_interrupted = False
+                                screen_interrupt_bad_samples = 0
+                                screen_interrupt_clear_samples = 0
+                                screen_interrupt_fraction = 0.0
+
+                                new_match_start_stable = 0
+                                new_match_start_key = None
+
+                                print(
+                                    "[MATCH] NEW GAME READY | "
+                                    f"Stockfish="
+                                    f"{'WHITE' if stockfish_color == chess.WHITE else 'BLACK'} "
+                                    f"| Human="
+                                    f"{'WHITE' if human_color == chess.WHITE else 'BLACK'}"
+                                )
+
+                                if fresh_first_move is not None:
+                                    print(
+                                        "[MATCH] White-human first move already present | "
+                                        f"{fresh_first_move.uci()} | internal board synced"
+                                    )
+                            else:
+                                progress(
+                                    "MATCH",
+                                    (
+                                        "new board candidate stable "
+                                        f"{new_match_start_stable}/2"
+                                    ),
+                                    key="new_match_stable",
+                                    force=True
+                                )
+                        else:
+                            new_match_start_stable = 0
+                            new_match_start_key = None
+
                 status = "READY - PRESS R"
 
                 if (
                     grid_locked
                     and cached_board_coords
                 ):
-                    if (
+                    if awaiting_new_match:
+                        status = (
+                            "MATCHMAKING - WAITING FOR NEW GAME"
+                        )
+                    elif (
                         not game_ready
                         or stockfish_color is None
                     ):
@@ -1291,6 +1739,7 @@ def main():
                     and grid_locked
                     and stockfish_color is not None
                     and not screen_interrupted
+                    and not awaiting_new_match
                 ):
                     if (
                         board.turn == human_color
