@@ -482,9 +482,9 @@ def click_move(
         )
         return False
 
-    # Keep the original drag behavior, but avoid a perfectly straight
-    # source->target cursor path. A tiny perpendicular offset is used at
-    # the midpoint, so the gesture remains fast while looking less robotic.
+    # Fast continuous drag with a very small natural bend.
+    # The bend is intentionally tiny so it does not turn the gesture into
+    # a slow/unstable path on scrcpy.
     sx, sy = square_screen_center(
         move.from_square,
         board_coords,
@@ -508,24 +508,26 @@ def click_move(
         math.hypot(dx, dy)
     )
 
-    # Small sideways deviation: 2-6 px, capped so short moves stay tight.
     offset = min(
-        6.0,
+        4.0,
         max(
-            2.0,
-            distance * 0.035
+            1.5,
+            distance * 0.022
         )
     )
 
     nx = -dy / distance
     ny = dx / distance
 
-    bend_sign = random.choice((-1.0, 1.0))
+    bend_sign = random.choice(
+        (-1.0, 1.0)
+    )
 
     mid_x = (
         (sx + tx) * 0.5
         + nx * offset * bend_sign
     )
+
     mid_y = (
         (sy + ty) * 0.5
         + ny * offset * bend_sign
@@ -543,17 +545,16 @@ def click_move(
         0
     )
 
-    # Move to source.
+    # Source.
     user32.SetCursorPos(
         int(sx),
         int(sy)
     )
 
     time.sleep(
-        0.008
+        0.006
     )
 
-    # One continuous drag gesture.
     user32.mouse_event(
         MOUSEEVENTF_LEFTDOWN,
         0,
@@ -563,27 +564,27 @@ def click_move(
     )
 
     time.sleep(
-        0.018
+        0.012
     )
 
-    # Slightly bent midpoint instead of a perfectly straight cursor line.
+    # Tiny sideways bend.
     user32.SetCursorPos(
         int(mid_x),
         int(mid_y)
     )
 
     time.sleep(
-        0.012
+        0.008
     )
 
-    # Final destination while still holding the mouse button.
+    # Target.
     user32.SetCursorPos(
         int(tx),
         int(ty)
     )
 
     time.sleep(
-        0.014
+        0.008
     )
 
     user32.mouse_event(
@@ -592,6 +593,12 @@ def click_move(
         0,
         0,
         0
+    )
+
+    # Small post-release settle prevents the first verification frame from
+    # catching the piece while scrcpy is still applying the move animation.
+    time.sleep(
+        0.018
     )
 
     user32.SetCursorPos(
