@@ -924,7 +924,7 @@ def choose_stockfish_move(
                 deep_move = None
 
             if deep_move is not None:
-                    return (
+                return (
                     deep_move,
                     deep_result,
                     {
@@ -937,6 +937,7 @@ def choose_stockfish_move(
                             f"DEEP={deep_cp / 100:+.2f}"
                         )
                     }
+                )
     
     # 4. BAKWAS: +5.00 to +8.00.
     if (
