@@ -1928,8 +1928,7 @@ def main():
                                         visual_black_perspective,
                                         scrcpy_hwnd,
                                         sct=sct,
-                                        promotion_color=board.turn,
-                                        before_frame=before_frame
+                                        promotion_color=board.turn
                                     )
 
                                     if not clicked:
@@ -2078,8 +2077,7 @@ def main():
                                             visual_black_perspective,
                                             scrcpy_hwnd,
                                             sct=sct,
-                                            promotion_color=board.turn,
-                                            before_frame=retry_frame
+                                            promotion_color=board.turn
                                         )
 
                                         if not clicked_retry:
