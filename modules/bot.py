@@ -462,8 +462,7 @@ def click_move(
     black_perspective,
     scrcpy_hwnd,
     sct=None,
-    promotion_color=None,
-    before_frame=None
+    promotion_color=None
 ):
     if not focus_scrcpy(
         scrcpy_hwnd
@@ -483,8 +482,14 @@ def click_move(
         )
         return False
 
-    # Touch-to-touch: source tap, short randomized pause, target tap.
-    # There is intentionally no mouse-down while moving between squares.
+    # Fast touch-to-touch input:
+    # 1) short real tap on source
+    # 2) short registration gap
+    # 3) short real tap on target
+    #
+    # A tiny press duration is intentional. An instantaneous Win32
+    # down/up pair can occasionally be missed by scrcpy/Android, which
+    # causes the expensive verification/retry loop seen in bullet games.
     sx, sy = square_screen_center(
         move.from_square,
         board_coords,
@@ -511,28 +516,69 @@ def click_move(
         0
     )
 
-    left_click_screen(
-        sx,
-        sy
+    # SOURCE TAP
+    user32.SetCursorPos(
+        int(sx),
+        int(sy)
+    )
+
+    user32.mouse_event(
+        MOUSEEVENTF_LEFTDOWN,
+        0,
+        0,
+        0,
+        0
     )
 
     time.sleep(
+        0.012
+    )
+
+    user32.mouse_event(
+        MOUSEEVENTF_LEFTUP,
+        0,
+        0,
+        0,
+        0
+    )
+
+    # Give the chess UI enough time to register the selected square,
+    # but keep the bullet gesture very short.
+    time.sleep(
         random.uniform(
-            0.010,
-            0.022
+            0.030,
+            0.045
         )
     )
 
-    left_click_screen(
-        tx,
-        ty
+    # TARGET TAP
+    user32.SetCursorPos(
+        int(tx),
+        int(ty)
+    )
+
+    user32.mouse_event(
+        MOUSEEVENTF_LEFTDOWN,
+        0,
+        0,
+        0,
+        0
     )
 
     time.sleep(
-        random.uniform(
-            0.002,
-            0.008
-        )
+        0.012
+    )
+
+    user32.mouse_event(
+        MOUSEEVENTF_LEFTUP,
+        0,
+        0,
+        0,
+        0
+    )
+
+    time.sleep(
+        0.004
     )
 
     user32.SetCursorPos(
