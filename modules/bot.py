@@ -482,9 +482,9 @@ def click_move(
         )
         return False
 
-    # Use one real drag gesture instead of two independent taps.
-    # This avoids the retry problem where a source square can already be
-    # selected and a second source tap would deselect it.
+    # Keep the original drag behavior, but avoid a perfectly straight
+    # source->target cursor path. A tiny perpendicular offset is used at
+    # the midpoint, so the gesture remains fast while looking less robotic.
     sx, sy = square_screen_center(
         move.from_square,
         board_coords,
@@ -501,29 +501,59 @@ def click_move(
         screen_origin=screen_origin
     )
 
-    print(
-        f"[BOT CLICK] {move.uci()} "
-        f"source=({sx},{sy}) target=({tx},{ty})"
+    dx = float(tx - sx)
+    dy = float(ty - sy)
+    distance = max(
+        1.0,
+        math.hypot(dx, dy)
     )
 
-    # Keep the cursor away from the board before the gesture.
+    # Small sideways deviation: 2-6 px, capped so short moves stay tight.
+    offset = min(
+        6.0,
+        max(
+            2.0,
+            distance * 0.035
+        )
+    )
+
+    nx = -dy / distance
+    ny = dx / distance
+
+    bend_sign = random.choice((-1.0, 1.0))
+
+    mid_x = (
+        (sx + tx) * 0.5
+        + nx * offset * bend_sign
+    )
+    mid_y = (
+        (sy + ty) * 0.5
+        + ny * offset * bend_sign
+    )
+
+    print(
+        f"[BOT DRAG] {move.uci()} "
+        f"source=({sx},{sy}) "
+        f"mid=({int(mid_x)},{int(mid_y)}) "
+        f"target=({tx},{ty})"
+    )
+
     user32.SetCursorPos(
         0,
         0
     )
-    time.sleep(
-        0.015
-    )
 
-    # Move to source and press.
+    # Move to source.
     user32.SetCursorPos(
         int(sx),
         int(sy)
     )
+
     time.sleep(
-        0.030
+        0.008
     )
 
+    # One continuous drag gesture.
     user32.mouse_event(
         MOUSEEVENTF_LEFTDOWN,
         0,
@@ -532,18 +562,28 @@ def click_move(
         0
     )
 
-    # Give scrcpy/Android enough time to register pickup before moving.
     time.sleep(
-        0.060
+        0.018
     )
 
-    # Drag while the left button remains down.
+    # Slightly bent midpoint instead of a perfectly straight cursor line.
+    user32.SetCursorPos(
+        int(mid_x),
+        int(mid_y)
+    )
+
+    time.sleep(
+        0.012
+    )
+
+    # Final destination while still holding the mouse button.
     user32.SetCursorPos(
         int(tx),
         int(ty)
     )
+
     time.sleep(
-        0.060
+        0.014
     )
 
     user32.mouse_event(
@@ -554,13 +594,9 @@ def click_move(
         0
     )
 
-    # Leave the cursor outside the board while verification runs.
     user32.SetCursorPos(
         0,
         0
-    )
-    time.sleep(
-        0.020
     )
 
     if move.promotion is not None:
@@ -591,6 +627,7 @@ def click_move(
         return promotion_ok
 
     return True
+
 
 def safe_drop_fraction(
     current_cp
