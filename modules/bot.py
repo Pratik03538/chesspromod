@@ -550,7 +550,7 @@ def click_move(
     )
 
     time.sleep(
-        0.008
+        0.020
     )
 
     # One continuous drag gesture.
@@ -563,7 +563,7 @@ def click_move(
     )
 
     time.sleep(
-        0.018
+        0.035
     )
 
     # Slightly bent midpoint instead of a perfectly straight cursor line.
@@ -583,7 +583,7 @@ def click_move(
     )
 
     time.sleep(
-        0.014
+        0.020
     )
 
     user32.mouse_event(
@@ -597,6 +597,11 @@ def click_move(
     user32.SetCursorPos(
         0,
         0
+    )
+
+    # Let scrcpy/Android settle the completed drag before verification.
+    time.sleep(
+        0.018
     )
 
     if move.promotion is not None:
