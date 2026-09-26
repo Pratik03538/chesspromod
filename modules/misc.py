@@ -817,6 +817,15 @@ def main():
                     lx, ly, lw, lh, la = left
                     rx, ry, rw, rh, ra = right
 
+                    if lx > rx:
+                        (
+                            lx, ly, lw, lh, la,
+                            rx, ry, rw, rh, ra
+                        ) = (
+                            rx, ry, rw, rh, ra,
+                            lx, ly, lw, lh, la
+                        )
+
                     if lx >= rx:
                         continue
 
