@@ -470,11 +470,8 @@ def click_move(
         print(
             "[BOT ERROR] Could not focus scrcpy window."
         )
-
         return False
 
-    # SPEED OPTIMIZATION:
-    # Only resolve the scrcpy screen origin once for source + target.
     screen_origin = get_scrcpy_screen_origin(
         scrcpy_hwnd
     )
@@ -485,8 +482,9 @@ def click_move(
         )
         return False
 
-    # Re-sample both pickup and drop points for every click attempt. Every
-    # point remains inside the centered 40%-area circle of its own square.
+    # Use one real drag gesture instead of two independent taps.
+    # This avoids the retry problem where a source square can already be
+    # selected and a second source tap would deselect it.
     sx, sy = square_screen_center(
         move.from_square,
         board_coords,
@@ -508,19 +506,24 @@ def click_move(
         f"source=({sx},{sy}) target=({tx},{ty})"
     )
 
-    # Keep the mouse cursor completely away from the chess board between
-    # moves. This prevents it from remaining on the previous source/target.
-    user32.SetCursorPos(0, 0)
-    time.sleep(0.010)
+    # Keep the cursor away from the board before the gesture.
+    user32.SetCursorPos(
+        0,
+        0
+    )
+    time.sleep(
+        0.015
+    )
 
-    # Select the locked source with a real press/hold/release sequence.
-    # The slightly longer hold makes source registration more reliable
-    # through scrcpy than the previous zero-duration dispatch.
+    # Move to source and press.
     user32.SetCursorPos(
         int(sx),
         int(sy)
     )
-    time.sleep(0.020)
+    time.sleep(
+        0.030
+    )
+
     user32.mouse_event(
         MOUSEEVENTF_LEFTDOWN,
         0,
@@ -528,32 +531,21 @@ def click_move(
         0,
         0
     )
-    time.sleep(0.035)
-    user32.mouse_event(
-        MOUSEEVENTF_LEFTUP,
-        0,
-        0,
-        0,
-        0
+
+    # Give scrcpy/Android enough time to register pickup before moving.
+    time.sleep(
+        0.060
     )
 
-    time.sleep(0.025)
-
-    # Drop only on the locked destination, again using a real
-    # press/hold/release sequence.
+    # Drag while the left button remains down.
     user32.SetCursorPos(
         int(tx),
         int(ty)
     )
-    time.sleep(0.020)
-    user32.mouse_event(
-        MOUSEEVENTF_LEFTDOWN,
-        0,
-        0,
-        0,
-        0
+    time.sleep(
+        0.060
     )
-    time.sleep(0.030)
+
     user32.mouse_event(
         MOUSEEVENTF_LEFTUP,
         0,
@@ -562,10 +554,14 @@ def click_move(
         0
     )
 
-    # Immediately park the cursor outside the board. It must not sit on
-    # the old move while the system is waiting for the verified result.
-    user32.SetCursorPos(0, 0)
-    time.sleep(0.010)
+    # Leave the cursor outside the board while verification runs.
+    user32.SetCursorPos(
+        0,
+        0
+    )
+    time.sleep(
+        0.020
+    )
 
     if move.promotion is not None:
         if promotion_color is None:
@@ -576,7 +572,6 @@ def click_move(
                 "[PROMOTION ERROR] "
                 "Screen capture context unavailable."
             )
-
             return False
 
         promotion_ok = select_promotion_piece(
@@ -588,12 +583,14 @@ def click_move(
             black_perspective
         )
 
-        # After promotion is also completed, keep the cursor off the board.
-        user32.SetCursorPos(0, 0)
+        user32.SetCursorPos(
+            0,
+            0
+        )
+
         return promotion_ok
 
     return True
-
 
 def safe_drop_fraction(
     current_cp
