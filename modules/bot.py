@@ -249,11 +249,21 @@ def select_promotion_piece(
             py
         )
 
-        # Confirm that the exact promotion piece requested by Stockfish is
-        # already on the destination square before accepting the promotion.
+        # Confirm what piece actually appeared on the destination square.
+        # If a promotion click selected the wrong piece, stop immediately.
+        # Retrying the menu click after a completed promotion is unsafe because
+        # the promotion menu is already closed and the next click lands on the
+        # normal board.
         promotion_ok = False
         promotion_reason = "promotion state not yet confirmed"
         promotion_deadline = time.perf_counter() + 0.10
+
+        promotion_types = (
+            chess.QUEEN,
+            chess.ROOK,
+            chess.BISHOP,
+            chess.KNIGHT,
+        )
 
         while time.perf_counter() < promotion_deadline:
             check_frame = capture_screen(
@@ -267,8 +277,6 @@ def select_promotion_piece(
                 )
                 continue
 
-            # Confirm directly on the destination square that the exact
-            # promotion piece requested by Stockfish is now visible.
             target_crop = get_square_crop(
                 check_frame,
                 board_coords,
@@ -279,13 +287,6 @@ def select_promotion_piece(
             templates = get_scaled_templates(
                 board_coords[2] / 8.0,
                 board_coords[3] / 8.0
-            )
-
-            detected_piece, detected_score = classify_square(
-                target_crop,
-                templates,
-                expected_symbol=expected,
-                match_threshold=BOT_POST_MATCH_THRESHOLD
             )
 
             source_crop = get_square_crop(
@@ -300,16 +301,55 @@ def select_promotion_piece(
                 templates
             )
 
-            if (
-                detected_piece == expected
-                and source_piece is None
-            ):
-                promotion_ok = True
-                promotion_reason = (
-                    f"source=empty destination={expected} "
-                    f"({detected_score:.3f})"
+            detected_promotions = []
+
+            for piece_type in promotion_types:
+                symbol = chess.Piece(
+                    piece_type,
+                    promotion_color
+                ).symbol()
+
+                detected_piece, detected_score = classify_square(
+                    target_crop,
+                    templates,
+                    expected_symbol=symbol,
+                    match_threshold=BOT_POST_MATCH_THRESHOLD
                 )
-                break
+
+                if detected_piece == symbol:
+                    detected_promotions.append(
+                        (
+                            float(detected_score),
+                            symbol
+                        )
+                    )
+
+            if (
+                source_piece is None
+                and detected_promotions
+            ):
+                detected_promotions.sort(
+                    key=lambda item: item[0]
+                )
+
+                detected_score, detected_symbol = (
+                    detected_promotions[0]
+                )
+
+                if detected_symbol == expected:
+                    promotion_ok = True
+                    promotion_reason = (
+                        f"source=empty destination={expected} "
+                        f"({detected_score:.3f})"
+                    )
+                    break
+
+                print(
+                    f"[PROMOTION] WRONG PIECE detected: "
+                    f"expected={expected} actual={detected_symbol}; "
+                    "game position not advanced"
+                )
+                return False
 
             time.sleep(
                 SCAN_INTERVAL
