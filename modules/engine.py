@@ -731,7 +731,7 @@ def choose_stockfish_move(
             chosen["info"],
             {
                 "rank": chosen["rank"],
-                "current_cp": best_cp,
+                "current_cp": current_advantage,
                 "selected_cp": chosen["cp"],
                 "reason": (
                     f"GM Lazy Conversion "
@@ -845,7 +845,7 @@ def choose_stockfish_move(
     # 4. BAKWAS: +5.00 to +8.00.
     if (
         HUMAN_LIKE_BAKWAS_MIN_ADVANTAGE_CP
-        < best_cp
+        < current_advantage
         < HUMAN_LIKE_BAKWAS_MAX_ADVANTAGE_CP
         and random.randint(
             1,
@@ -896,7 +896,7 @@ def choose_stockfish_move(
     # 5. NORMAL INACCURACY: +2.50 to +5.00.
     if (
         HUMAN_LIKE_INACCURACY_MIN_ADVANTAGE_CP
-        < best_cp
+        < current_advantage
         <= HUMAN_LIKE_INACCURACY_MAX_ADVANTAGE_CP
         and random.randint(
             1,
