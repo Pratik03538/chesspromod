@@ -64,76 +64,6 @@ def side_material(
 
 
 
-def choose_human_candidate(
-    board,
-    candidate_list
-):
-    """Choose a human-like candidate without making MultiPV rank dominant.
-
-    Every candidate already passed by the caller remains eligible. Rank only
-    has a very small effect; safe captures receive a much stronger preference,
-    matching the tendency to take an available opponent piece.
-    """
-    if not candidate_list:
-        return None
-
-    if len(candidate_list) == 1:
-        return candidate_list[0]
-
-    weighted = []
-
-    for candidate in candidate_list:
-        rank = int(candidate.get("rank", 0))
-
-        # Keep rank influence intentionally flat: #1/#2 should not dominate
-        # simply because Stockfish listed them first.
-        rank_weight = max(
-            0.90,
-            1.0 - (rank * 0.006)
-        )
-
-        weight = rank_weight
-        move = candidate["move"]
-
-        if board.is_capture(move):
-            captured_piece = board.piece_at(
-                move.to_square
-            )
-
-            if (
-                captured_piece is None
-                and board.is_en_passant(move)
-            ):
-                captured_value = material_value(
-                    chess.PAWN
-                )
-            elif captured_piece is not None:
-                captured_value = material_value(
-                    captured_piece.piece_type
-                )
-            else:
-                captured_value = 0
-
-            capture_weight = (
-                4.0
-                + min(
-                    captured_value,
-                    900
-                ) / 900.0 * 2.0
-            )
-
-            weight *= capture_weight
-
-        weighted.append(
-            (candidate, weight)
-        )
-
-    return random.choices(
-        [item[0] for item in weighted],
-        weights=[item[1] for item in weighted],
-        k=1
-    )[0]
-
 def classify_move_quality(
     before_board,
     after_board,
@@ -422,6 +352,77 @@ def choose_stockfish_move(
     opponent_pressure=False,
     engine=None
 ):
+    def choose_human_candidate(
+        board,
+        candidate_list
+    ):
+        """Choose a human-like candidate without making MultiPV rank dominant.
+    
+        Every candidate already passed by the caller remains eligible. Rank only
+        has a very small effect; safe captures receive a much stronger preference,
+        matching the tendency to take an available opponent piece.
+        """
+        if not candidate_list:
+            return None
+    
+        if len(candidate_list) == 1:
+            return candidate_list[0]
+    
+        weighted = []
+    
+        for candidate in candidate_list:
+            rank = int(candidate.get("rank", 0))
+    
+            # Keep rank influence intentionally flat: #1/#2 should not dominate
+            # simply because Stockfish listed them first.
+            rank_weight = max(
+                0.90,
+                1.0 - (rank * 0.006)
+            )
+    
+            weight = rank_weight
+            move = candidate["move"]
+    
+            if board.is_capture(move):
+                captured_piece = board.piece_at(
+                    move.to_square
+                )
+    
+                if (
+                    captured_piece is None
+                    and board.is_en_passant(move)
+                ):
+                    captured_value = material_value(
+                        chess.PAWN
+                    )
+                elif captured_piece is not None:
+                    captured_value = material_value(
+                        captured_piece.piece_type
+                    )
+                else:
+                    captured_value = 0
+    
+                capture_weight = (
+                    4.0
+                    + min(
+                        captured_value,
+                        900
+                    ) / 900.0 * 2.0
+                )
+    
+                weight *= capture_weight
+    
+            weighted.append(
+                (candidate, weight)
+            )
+    
+        return random.choices(
+            [item[0] for item in weighted],
+            weights=[item[1] for item in weighted],
+            k=1
+        )[0]
+    
+
     if not multipv_infos:
         return (
             None,
@@ -779,7 +780,7 @@ def choose_stockfish_move(
     # winning candidates are eligible instead of only #1-#4.
     if (
         current_advantage >= HUMAN_LIKE_LAZY_MIN_ADVANTAGE_CP
-        and current_advantage < HUMAN_LIKE_LAZY_MAX_ADVANTAGE_CP
+        and current_advantage < 1000
     ):
         acceptable_finishers = [
             candidate
