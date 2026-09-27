@@ -492,6 +492,20 @@ def main():
     global _advantage_progress_hold_limit
     global _advantage_progress_side
 
+    # Keep Windows awake for the entire lifetime of this running bot.
+    # ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED prevents
+    # automatic system sleep and display power-off while the code runs.
+    _execution_state_active = False
+    if os.name == "nt":
+        try:
+            _execution_state_active = bool(
+                ctypes.windll.kernel32.SetThreadExecutionState(
+                    0x80000003
+                )
+            )
+        except Exception:
+            _execution_state_active = False
+
     # Keep the terminal clean. All user-facing move/rank output is rendered
     # by the game UI instead of the diagnostic console.
     builtins_module = __import__(
@@ -3837,6 +3851,17 @@ def main():
                 )
 
         finally:
+            if (
+                os.name == "nt"
+                and _execution_state_active
+            ):
+                try:
+                    ctypes.windll.kernel32.SetThreadExecutionState(
+                        0x80000000
+                    )
+                except Exception:
+                    pass
+
             cv2.destroyAllWindows()
 
             if book_reader is not None:
