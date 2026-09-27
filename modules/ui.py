@@ -231,6 +231,7 @@ def draw_overlay(
         + 24
         + 24
         + 42
+        + 105
         + 87
         + 16
         + button_h
@@ -436,6 +437,175 @@ def draw_overlay(
         cv2.LINE_AA
     )
 
+    # Current engine evaluation / match favour.
+    # Positive values favor White; negative values favor Black.
+    eval_cp = None
+    eval_text = "EVAL --"
+    favor_text = "NO EVAL"
+
+    if isinstance(analysis_state, dict):
+        try:
+            eval_cp = float(
+                analysis_state.get(
+                    "eval_cp"
+                )
+            )
+        except Exception:
+            eval_cp = None
+
+        eval_text = str(
+            analysis_state.get(
+                "eval_text",
+                "EVAL --"
+            )
+        )
+        favor_text = str(
+            analysis_state.get(
+                "favor",
+                "NO EVAL"
+            )
+        )
+
+    eval_title_y = panel_y + 142
+    eval_bar_x1 = panel_x + 12
+    eval_bar_x2 = panel_x + panel_w - 12
+    eval_bar_y1 = eval_title_y + 34
+    eval_bar_y2 = eval_bar_y1 + 18
+    eval_center_x = (
+        eval_bar_x1 + (eval_bar_x2 - eval_bar_x1) // 2
+    )
+
+    cv2.putText(
+        display_frame,
+        "MATCH EVAL",
+        (
+            panel_x + 12,
+            eval_title_y
+        ),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.40,
+        (155, 155, 165),
+        1,
+        cv2.LINE_AA
+    )
+
+    cv2.rectangle(
+        display_frame,
+        (
+            eval_bar_x1,
+            eval_bar_y1
+        ),
+        (
+            eval_bar_x2,
+            eval_bar_y2
+        ),
+        (75, 75, 82),
+        -1
+    )
+
+    cv2.line(
+        display_frame,
+        (
+            eval_center_x,
+            eval_bar_y1 - 3
+        ),
+        (
+            eval_center_x,
+            eval_bar_y2 + 3
+        ),
+        (215, 215, 220),
+        1
+    )
+
+    if eval_cp is not None:
+        eval_units = (
+            100000.0
+            if abs(eval_cp) >= 100000.0
+            else max(
+                -500.0,
+                min(
+                    500.0,
+                    eval_cp
+                )
+            )
+        )
+
+        if abs(eval_units) >= 100000.0:
+            fill_left = (
+                eval_units < 0
+            )
+            fill_fraction = 1.0
+        else:
+            fill_fraction = (
+                abs(eval_units) / 500.0
+            )
+            fill_left = (
+                eval_units < 0
+            )
+
+        fill_width = int(
+            (eval_bar_x2 - eval_center_x)
+            * fill_fraction
+        )
+
+        if fill_width > 0:
+            if fill_left:
+                cv2.rectangle(
+                    display_frame,
+                    (
+                        eval_center_x - fill_width,
+                        eval_bar_y1 + 1
+                    ),
+                    (
+                        eval_center_x,
+                        eval_bar_y2 - 1
+                    ),
+                    (90, 90, 210),
+                    -1
+                )
+            else:
+                cv2.rectangle(
+                    display_frame,
+                    (
+                        eval_center_x,
+                        eval_bar_y1 + 1
+                    ),
+                    (
+                        eval_center_x + fill_width,
+                        eval_bar_y2 - 1
+                    ),
+                    (210, 210, 90),
+                    -1
+                )
+
+    cv2.putText(
+        display_frame,
+        eval_text,
+        (
+            panel_x + 12,
+            eval_bar_y2 + 25
+        ),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.38,
+        (235, 235, 240),
+        1,
+        cv2.LINE_AA
+    )
+
+    cv2.putText(
+        display_frame,
+        favor_text,
+        (
+            panel_x + 112,
+            eval_bar_y2 + 25
+        ),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.34,
+        (185, 185, 195),
+        1,
+        cv2.LINE_AA
+    )
+
     watchdog_states = {
         "THINKING",
         "PRE-CLICK CHECK",
@@ -462,7 +632,7 @@ def draw_overlay(
             cv2.LINE_AA
         )
 
-    buttons_y = panel_y + 139
+    buttons_y = panel_y + 263
     new_x1 = panel_x + 12
     new_y1 = buttons_y
     new_x2 = new_x1 + button_w
