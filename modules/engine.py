@@ -374,10 +374,7 @@ def choose_stockfish_move(
         # advantage, never intentionally select a candidate below the
         # persistent max-evaluation drawdown limit. If no candidate survives,
         # keep the original pool so the caller can fall back to the engine best.
-        if (
-            "favorable_floor_active" in globals()
-            and favorable_floor_active
-        ):
+        if favorable_floor_active:
             consistent_candidates = [
                 candidate
                 for candidate in selection_pool
