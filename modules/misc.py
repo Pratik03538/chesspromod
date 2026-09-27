@@ -987,7 +987,7 @@ def main():
             return 0.0
 
     def detect_new_game_button(frame):
-        """Detect the completed-game Rematch and New controls only."""
+        """Detect only the completed-game Rematch + New 1+1 buttons."""
         detect_new_game_button._rematch_button_center = None
         detect_new_game_button._new_game_button_center = None
 
@@ -997,288 +997,322 @@ def main():
         try:
             height, width = frame.shape[:2]
 
-            # Completed result controls can shift slightly with the viewport and
-            # result layout. Scan a wider upper-middle band instead of relying
-            # on one narrow fixed y-range.
-            roi_y1 = int(height * 0.20)
-            roi_y2 = int(height * 0.58)
+            # The result-page action pair is a pair of large rounded
+            # rectangular controls. Use their visible outlines instead of
+            # dark-color segmentation: the latter merges with the page
+            # background on the real result screen.
+            roi_y1 = int(height * 0.28)
+            roi_y2 = int(height * 0.50)
 
             roi = frame[
                 roi_y1:roi_y2,
                 :
             ]
 
-            hsv = cv2.cvtColor(
+            gray = cv2.cvtColor(
                 roi,
-                cv2.COLOR_BGR2HSV
+                cv2.COLOR_BGR2GRAY
             )
 
-            saturation = hsv[:, :, 1]
-            value = hsv[:, :, 2]
+            gray = cv2.GaussianBlur(
+                gray,
+                (5, 5),
+                0
+            )
 
-            masks = [
-                (
-                    (saturation < 80)
-                    & (value >= 25)
-                    & (value <= 170)
-                ),
-                (
-                    (saturation < 105)
-                    & (value >= 20)
-                    & (value <= 200)
-                ),
-                (
-                    (saturation < 125)
-                    & (value >= 25)
-                    & (value <= 230)
+            edges = cv2.Canny(
+                gray,
+                10,
+                35
+            )
+
+            contours, _ = cv2.findContours(
+                edges,
+                cv2.RETR_LIST,
+                cv2.CHAIN_APPROX_SIMPLE
+            )
+
+            boxes = []
+
+            for contour in contours:
+                bx, by, bw, bh = cv2.boundingRect(
+                    contour
                 )
+
+                by += roi_y1
+
+                aspect = (
+                    bw
+                    / float(
+                        max(
+                            1,
+                            bh
+                        )
+                    )
+                )
+
+                if not (
+                    width * 0.30
+                    <= bw
+                    <= width * 0.60
+                    and height * 0.04
+                    <= bh
+                    <= height * 0.09
+                    and 2.5
+                    <= aspect
+                    <= 5.5
+                ):
+                    continue
+
+                center_x = (
+                    bx
+                    + bw / 2.0
+                )
+                center_y = (
+                    by
+                    + bh / 2.0
+                )
+
+                boxes.append(
+                    (
+                        bx,
+                        by,
+                        bw,
+                        bh,
+                        center_x,
+                        center_y
+                    )
+                )
+
+            # Canny can return both the outer and inner edge of the same
+            # rounded button. De-duplicate centers before pairing.
+            unique_boxes = []
+
+            for box in sorted(
+                boxes,
+                key=lambda item: item[2] * item[3],
+                reverse=True
+            ):
+                duplicate = False
+
+                for existing in unique_boxes:
+                    if (
+                        abs(
+                            box[4]
+                            - existing[4]
+                        )
+                        < width * 0.02
+                        and
+                        abs(
+                            box[5]
+                            - existing[5]
+                        )
+                        < height * 0.02
+                    ):
+                        duplicate = True
+                        break
+
+                if not duplicate:
+                    unique_boxes.append(
+                        box
+                    )
+
+            left_boxes = [
+                box
+                for box in unique_boxes
+                if box[4] < width * 0.50
+            ]
+
+            right_boxes = [
+                box
+                for box in unique_boxes
+                if box[4] >= width * 0.50
             ]
 
             best_pair = None
             best_pair_score = -1.0
 
-            for base_mask in masks:
-                mask = base_mask.astype(
-                    np.uint8
-                )
+            for left_box in left_boxes:
+                for right_box in right_boxes:
+                    (
+                        _left_x,
+                        _left_y,
+                        left_w,
+                        left_h,
+                        left_cx,
+                        left_cy
+                    ) = left_box
 
-                mask = cv2.morphologyEx(
-                    mask,
-                    cv2.MORPH_CLOSE,
-                    np.ones(
-                        (9, 17),
-                        np.uint8
-                    )
-                )
+                    (
+                        _right_x,
+                        _right_y,
+                        right_w,
+                        right_h,
+                        right_cx,
+                        right_cy
+                    ) = right_box
 
-                mask = cv2.morphologyEx(
-                    mask,
-                    cv2.MORPH_OPEN,
-                    np.ones(
-                        (3, 5),
-                        np.uint8
-                    )
-                )
-
-                contours, _ = cv2.findContours(
-                    mask,
-                    cv2.RETR_EXTERNAL,
-                    cv2.CHAIN_APPROX_SIMPLE
-                )
-
-                boxes = []
-
-                for contour in contours:
-                    bx, by, bw, bh = cv2.boundingRect(
-                        contour
+                    center_gap = abs(
+                        right_cx
+                        - left_cx
                     )
 
-                    by += roi_y1
-
-                    if not (
-                        bw >= width * 0.20
-                        and bh >= height * 0.022
-                        and bh <= height * 0.11
-                        and bw / float(max(1, bh)) >= 2.4
-                        and bw / float(max(1, bh)) <= 12.0
-                    ):
-                        continue
-
-                    center_x = (
-                        bx
-                        + bw / 2.0
-                    )
-                    center_y = (
-                        by
-                        + bh / 2.0
+                    center_y_gap = abs(
+                        right_cy
+                        - left_cy
                     )
 
-                    if not (
-                        width * 0.05
-                        <= center_x
-                        <= width * 0.95
-                    ):
-                        continue
-
-                    boxes.append(
-                        (
-                            bx,
-                            by,
-                            bw,
-                            bh,
-                            center_x,
-                            center_y
+                    width_ratio = (
+                        min(
+                            left_w,
+                            right_w
                         )
-                    )
-
-                if len(boxes) < 2:
-                    continue
-
-                left_boxes = [
-                    box
-                    for box in boxes
-                    if box[4] < width * 0.50
-                ]
-
-                right_boxes = [
-                    box
-                    for box in boxes
-                    if box[4] >= width * 0.50
-                ]
-
-                for left_box in left_boxes:
-                    for right_box in right_boxes:
-                        left_x, left_y, left_w, left_h, left_cx, left_cy = left_box
-                        right_x, right_y, right_w, right_h, right_cx, right_cy = right_box
-
-                        center_gap = abs(
-                            right_cx
-                            - left_cx
-                        )
-
-                        if not (
-                            width * 0.18
-                            <= center_gap
-                            <= width * 0.76
-                        ):
-                            continue
-
-                        center_y_gap = abs(
-                            right_cy
-                            - left_cy
-                        )
-
-                        if center_y_gap > height * 0.055:
-                            continue
-
-                        width_ratio = (
-                            min(
-                                left_w,
-                                right_w
-                            )
-                            / float(
-                                max(
-                                    1,
-                                    max(
-                                        left_w,
-                                        right_w
-                                    )
-                                )
-                            )
-                        )
-
-                        height_ratio = (
-                            min(
-                                left_h,
-                                right_h
-                            )
-                            / float(
-                                max(
-                                    1,
-                                    max(
-                                        left_h,
-                                        right_h
-                                    )
-                                )
-                            )
-                        )
-
-                        if (
-                            width_ratio < 0.55
-                            or height_ratio < 0.55
-                        ):
-                            continue
-
-                        pair_area = (
-                            left_w
-                            * left_h
-                            + right_w
-                            * right_h
-                        )
-
-                        alignment_score = (
+                        / float(
                             max(
-                                0.0,
-                                1.0
-                                - (
-                                    center_y_gap
-                                    / max(
-                                        1.0,
-                                        height * 0.055
-                                    )
+                                1,
+                                max(
+                                    left_w,
+                                    right_w
                                 )
                             )
                         )
+                    )
 
-                        size_score = (
-                            0.50 * width_ratio
-                            + 0.50 * height_ratio
+                    height_ratio = (
+                        min(
+                            left_h,
+                            right_h
                         )
+                        / float(
+                            max(
+                                1,
+                                max(
+                                    left_h,
+                                    right_h
+                                )
+                            )
+                        )
+                    )
 
-                        area_score = min(
-                            1.0,
-                            pair_area
+                    if not (
+                        width * 0.35
+                        <= center_gap
+                        <= width * 0.60
+                        and
+                        center_y_gap
+                        <= height * 0.025
+                        and
+                        width_ratio
+                        >= 0.80
+                        and
+                        height_ratio
+                        >= 0.75
+                    ):
+                        continue
+
+                    size_score = (
+                        0.50 * width_ratio
+                        + 0.50 * height_ratio
+                    )
+
+                    alignment_score = max(
+                        0.0,
+                        1.0
+                        - (
+                            center_y_gap
                             / max(
                                 1.0,
-                                width
-                                * height
-                                * 0.12
+                                height * 0.025
                             )
                         )
+                    )
 
-                        pair_score = (
-                            2.0 * size_score
-                            + 1.5 * alignment_score
-                            + area_score
-                            + min(
+                    gap_score = max(
+                        0.0,
+                        1.0
+                        - (
+                            abs(
                                 center_gap
-                                / max(
-                                    1.0,
-                                    width * 0.35
-                                ),
-                                1.5
+                                - width * 0.47
+                            )
+                            / max(
+                                1.0,
+                                width * 0.20
                             )
                         )
+                    )
 
-                        if pair_score > best_pair_score:
-                            best_pair_score = pair_score
-                            best_pair = (
-                                left_box,
-                                right_box
-                            )
+                    size_area_score = min(
+                        1.0,
+                        min(
+                            left_w,
+                            right_w
+                        )
+                        / max(
+                            1.0,
+                            width * 0.50
+                        )
+                    )
+
+                    pair_score = (
+                        2.0 * size_score
+                        + 2.0 * alignment_score
+                        + gap_score
+                        + size_area_score
+                    )
+
+                    if pair_score > best_pair_score:
+                        best_pair_score = pair_score
+                        best_pair = (
+                            left_box,
+                            right_box
+                        )
 
             if best_pair is None:
                 return None
 
             left_button, right_button = best_pair
 
-            l_x, l_y, l_w, l_h, _, _ = left_button
-            r_x, r_y, r_w, r_h, _, _ = right_button
+            (
+                left_x,
+                left_y,
+                left_w,
+                left_h,
+                _left_cx,
+                _left_cy
+            ) = left_button
+
+            (
+                right_x,
+                right_y,
+                right_w,
+                right_h,
+                _right_cx,
+                _right_cy
+            ) = right_button
 
             detect_new_game_button._rematch_button_center = (
                 int(
-                    l_x
-                    + l_w / 2
+                    left_x
+                    + left_w / 2
                 ),
                 int(
-                    l_y
-                    + l_h / 2
+                    left_y
+                    + left_h / 2
                 )
             )
 
             detect_new_game_button._new_game_button_center = (
                 int(
-                    r_x
-                    + r_w / 2
+                    right_x
+                    + right_w / 2
                 ),
                 int(
-                    r_y
-                    + r_h / 2
+                    right_y
+                    + right_h / 2
                 )
             )
 
-            # Keep the existing return contract: the right-side New button is
-            # the primary result-action center used by stability tracking.
             return detect_new_game_button._new_game_button_center
 
         except Exception:
