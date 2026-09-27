@@ -1353,10 +1353,44 @@ def main():
 
     with mss.mss() as sct:
         try:
+            last_live_heartbeat = 0.0
+
             while True:
                 key = cv2.waitKey(
                     1
                 ) & 0xFF
+
+                heartbeat_now = time.perf_counter()
+                if heartbeat_now - last_live_heartbeat >= 1.0:
+                    last_live_heartbeat = heartbeat_now
+
+                    try:
+                        turn_name = (
+                            "WHITE"
+                            if board.turn == chess.WHITE
+                            else "BLACK"
+                        )
+                        bot_name = (
+                            "STOCKFISH"
+                            if stockfish_color is not None
+                            and board.turn == stockfish_color
+                            else "HUMAN"
+                        )
+                        print(
+                            "[HEARTBEAT] "
+                            f"game_ready={game_ready} "
+                            f"grid_locked={grid_locked} "
+                            f"bot_thinking={bot_thinking} "
+                            f"turn={turn_name}/{bot_name} "
+                            f"ply={len(board.move_stack)} "
+                            f"pending={len(pending_bot_moves)} "
+                            f"screen_guard={screen_interrupted} "
+                            f"obstruction={screen_interrupt_fraction:.3f}"
+                        )
+                    except Exception as _heartbeat_error:
+                        print(
+                            f"[HEARTBEAT ERROR] {_heartbeat_error}"
+                        )
 
                 if key == ord("q"):
                     save_game_pgn(
