@@ -1201,9 +1201,30 @@ def main():
             if not candidates:
                 return None
 
+            lower_action_candidates = [
+                candidate
+                for candidate in candidates
+                if (
+                    candidate[2] + candidate[4] / 2.0
+                    >= height * 0.68
+                    and candidate[1] + candidate[3] / 2.0
+                    >= width * 0.15
+                    and candidate[1] + candidate[3] / 2.0
+                    <= width * 0.65
+                )
+            ]
+
+            if not lower_action_candidates:
+                return None
+
+            # On the aborted layout, the actual New button is the lower
+            # action control. The higher Game Review control is ignored.
             _, x, y, w, h = max(
-                candidates,
-                key=lambda item: item[0]
+                lower_action_candidates,
+                key=lambda item: (
+                    item[2] + item[4] / 2.0,
+                    item[0]
+                )
             )
 
             detect_new_game_button._abort_layout = True
