@@ -3903,34 +3903,62 @@ def main():
 
                                         if (
                                             late_recovery is not None
-                                            and late_recovery.get("bot_move") == best_move
                                             and late_recovery.get("frame") is not None
-                                            and late_recovery.get("kind") in (
-                                                "BOT_ONLY",
-                                                "BOT_PLUS_HUMAN"
-                                            )
                                         ):
                                             recovery_frame = late_recovery["frame"]
-                                            recovered_human = late_recovery.get("human_move")
 
-                                            if recovered_human is not None:
-                                                pending_recovered_human = (
-                                                    recovered_human,
-                                                    recovery_frame
+                                            if late_recovery.get("kind") == "INTERNAL_UNCHANGED":
+                                                # No touch/move was detected. The full rescan
+                                                # proved that the screen still matches the
+                                                # committed internal board, so refresh the
+                                                # pre-click baseline and continue to the normal
+                                                # Stockfish click path. Do NOT board.push() here.
+                                                before_frame = recovery_frame
+                                                baseline_frame = recovery_frame
+                                                pre_ok = True
+                                                pre_reason = late_recovery["reason"]
+                                                print(
+                                                    "[RECOVERY] FULL RESCAN | board unchanged | "
+                                                    "refreshing pre-click baseline; continuing "
+                                                    f"{best_san}"
                                                 )
+                                            elif (
+                                                late_recovery.get("bot_move") == best_move
+                                                and late_recovery.get("kind") in (
+                                                    "BOT_ONLY",
+                                                    "BOT_PLUS_HUMAN"
+                                                )
+                                            ):
+                                                recovered_human = late_recovery.get("human_move")
 
-                                            verified = True
-                                            after_frame = recovery_frame
-                                            reason = late_recovery["reason"]
-                                            print(
-                                                "[RECOVERY] Pending move recovered from full-board state: "
-                                                f"{best_san}"
-                                                + (
-                                                    " + human reply already present"
-                                                    if recovered_human is not None
-                                                    else ""
+                                                if recovered_human is not None:
+                                                    pending_recovered_human = (
+                                                        recovered_human,
+                                                        recovery_frame
+                                                    )
+
+                                                verified = True
+                                                after_frame = recovery_frame
+                                                reason = late_recovery["reason"]
+                                                print(
+                                                    "[RECOVERY] Pending move recovered from full-board state: "
+                                                    f"{best_san}"
+                                                    + (
+                                                        " + human reply already present"
+                                                        if recovered_human is not None
+                                                        else ""
+                                                    )
                                                 )
-                                            )
+                                                # Keep the original commit path below.
+                                            else:
+                                                last_bot_position_key = position_key
+                                                print(
+                                                    "[VALIDATION] WAITING | pending Stockfish move "
+                                                    "not yet physically confirmed; no click and no board.push() | "
+                                                    f"{pre_reason}"
+                                                )
+                                                time.sleep(BOT_RECOVERY_POLL)
+                                                continue
                                         else:
                                             last_bot_position_key = position_key
                                             print(
