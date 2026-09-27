@@ -39,248 +39,355 @@ def draw_overlay(
     human_color,
     analysis_state=None
 ):
-    x, y, w, h = board_coords
+    height, width = display_frame.shape[:2]
 
-    sq_w = w / 8.0
-    sq_h = h / 8.0
-
-    grid_color = (
-        (0, 255, 0)
-        if locked
-        else (0, 255, 255)
+    ui_state = getattr(
+        draw_overlay,
+        "_ui_state",
+        None
     )
+
+    if ui_state is None:
+        ui_state = {
+            "new_game": True,
+            "rematch": False,
+            "new_rect": None,
+            "rematch_rect": None,
+            "mouse_ready": False,
+        }
+        draw_overlay._ui_state = ui_state
+
+        def _mouse_callback(
+            event,
+            mx,
+            my,
+            flags,
+            param
+        ):
+            if event != cv2.EVENT_LBUTTONDOWN:
+                return
+
+            state = getattr(
+                draw_overlay,
+                "_ui_state",
+                None
+            )
+
+            if state is None:
+                return
+
+            new_rect = state.get(
+                "new_rect"
+            )
+
+            if (
+                new_rect is not None
+                and new_rect[0] <= mx <= new_rect[2]
+                and new_rect[1] <= my <= new_rect[3]
+            ):
+                state["new_game"] = not bool(
+                    state.get(
+                        "new_game",
+                        True
+                    )
+                )
+                return
+
+            rematch_rect = state.get(
+                "rematch_rect"
+            )
+
+            if (
+                rematch_rect is not None
+                and rematch_rect[0] <= mx <= rematch_rect[2]
+                and rematch_rect[1] <= my <= rematch_rect[3]
+            ):
+                state["rematch"] = not bool(
+                    state.get(
+                        "rematch",
+                        False
+                    )
+                )
+
+        try:
+            cv2.namedWindow(
+                "Chess Vision Tracker",
+                cv2.WINDOW_AUTOSIZE
+            )
+            cv2.setMouseCallback(
+                "Chess Vision Tracker",
+                _mouse_callback
+            )
+            ui_state["mouse_ready"] = True
+        except Exception:
+            ui_state["mouse_ready"] = False
+
+    button_h = 34
+    button_gap = 8
+    button_w = min(
+        150,
+        max(
+            120,
+            int(width * 0.17)
+        )
+    )
+
+    buttons_x = max(
+        10,
+        width - (
+            button_w * 2
+            + button_gap
+            + 12
+        )
+    )
+    buttons_y = 10
+
+    new_x1 = buttons_x
+    new_y1 = buttons_y
+    new_x2 = new_x1 + button_w
+    new_y2 = new_y1 + button_h
+
+    rematch_x1 = new_x2 + button_gap
+    rematch_y1 = buttons_y
+    rematch_x2 = rematch_x1 + button_w
+    rematch_y2 = rematch_y1 + button_h
+
+    ui_state["new_rect"] = (
+        new_x1,
+        new_y1,
+        new_x2,
+        new_y2
+    )
+
+    ui_state["rematch_rect"] = (
+        rematch_x1,
+        rematch_y1,
+        rematch_x2,
+        rematch_y2
+    )
+
+    button_radius = 8
 
     cv2.rectangle(
         display_frame,
-        (x, y),
-        (x + w, y + h),
-        grid_color,
-        2
-    )
-
-    for i in range(1, 8):
-        cv2.line(
-            display_frame,
-            (
-                x,
-                y + int(i * sq_h)
-            ),
-            (
-                x + w,
-                y + int(i * sq_h)
-            ),
-            grid_color,
-            1
-        )
-
-        cv2.line(
-            display_frame,
-            (
-                x + int(i * sq_w),
-                y
-            ),
-            (
-                x + int(i * sq_w),
-                y + h
-            ),
-            grid_color,
-            1
-        )
-
-    if grid is not None:
-        for row in range(8):
-            for col in range(8):
-                symbol = grid[row][col]
-
-                if not symbol:
-                    continue
-
-                fx1 = int(
-                    x + col * sq_w
-                )
-
-                fy1 = int(
-                    y + row * sq_h
-                )
-
-                color = (
-                    (0, 255, 255)
-                    if symbol.isupper()
-                    else (0, 0, 255)
-                )
-
-                cv2.putText(
-                    display_frame,
-                    symbol,
-                    (
-                        fx1
-                        + int(sq_w / 3),
-                        fy1
-                        + int(sq_h / 1.5)
-                    ),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.70,
-                    color,
-                    2
-                )
-
-    cv2.rectangle(
-        display_frame,
-        (0, 0),
+        (new_x1, new_y1),
+        (new_x2, new_y2),
         (
-            display_frame.shape[1],
-            48
+            (35, 150, 70)
+            if ui_state["new_game"]
+            else (70, 70, 70)
         ),
-        (0, 0, 0),
         -1
+    )
+
+    cv2.rectangle(
+        display_frame,
+        (rematch_x1, rematch_y1),
+        (rematch_x2, rematch_y2),
+        (
+            (35, 150, 70)
+            if ui_state["rematch"]
+            else (70, 70, 70)
+        ),
+        -1
+    )
+
+    new_label = (
+        "NEW GAME: ON"
+        if ui_state["new_game"]
+        else "NEW GAME: OFF"
+    )
+
+    rematch_label = (
+        "REMATCH: ON"
+        if ui_state["rematch"]
+        else "REMATCH: OFF"
     )
 
     cv2.putText(
         display_frame,
-        status,
-        (8, 18),
+        new_label,
+        (
+            new_x1 + 10,
+            new_y1 + 23
+        ),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.42,
-        (0, 255, 255),
-        1
+        0.40,
+        (255, 255, 255),
+        1,
+        cv2.LINE_AA
     )
 
-    if analysis_state is not None:
-        panel_bottom = max(
-            52,
-            y - 4
-        )
+    cv2.putText(
+        display_frame,
+        rematch_label,
+        (
+            rematch_x1 + 10,
+            rematch_y1 + 23
+        ),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.40,
+        (255, 255, 255),
+        1,
+        cv2.LINE_AA
+    )
 
-        panel_top = max(
-            46,
-            panel_bottom - 58
+    # Keep the visual grid only while the grid is being positioned.
+    # Once locked, the captured chessboard stays clean.
+    if not locked:
+        x, y, w, h = board_coords
+        sq_w = w / 8.0
+        sq_h = h / 8.0
+
+        grid_color = (
+            (0, 255, 255)
+            if not locked
+            else (0, 255, 0)
         )
 
         cv2.rectangle(
             display_frame,
-            (0, panel_top),
-            (
-                display_frame.shape[1],
-                panel_bottom
-            ),
-            (15, 15, 15),
-            -1
+            (x, y),
+            (x + w, y + h),
+            grid_color,
+            2
         )
 
-        eval_text = analysis_state.get(
-            "eval_text",
-            "--"
-        )
+        for i in range(1, 8):
+            cv2.line(
+                display_frame,
+                (
+                    x,
+                    y + int(i * sq_h)
+                ),
+                (
+                    x + w,
+                    y + int(i * sq_h)
+                ),
+                grid_color,
+                1
+            )
 
-        favor = analysis_state.get(
-            "favor",
-            "--"
-        )
+            cv2.line(
+                display_frame,
+                (
+                    x + int(i * sq_w),
+                    y
+                ),
+                (
+                    x + int(i * sq_w),
+                    y + h
+                ),
+                grid_color,
+                1
+            )
 
-        quality = analysis_state.get(
-            "quality",
-            "--"
-        )
-
-        last_move = analysis_state.get(
-            "last_move",
-            "--"
-        )
-
-        best_move = analysis_state.get(
-            "best_move",
-            "--"
-        )
-
-        depth = analysis_state.get(
-            "depth",
-            "--"
-        )
-
-        pv = analysis_state.get(
-            "pv",
-            "--"
-        )
-
-        line1 = (
-            f"EVAL {eval_text}   "
-            f"FAVOR {favor}"
-        )
-
-        line2 = (
-            f"LAST {last_move}   "
-            f"QUALITY {quality}   "
-            f"DEPTH {depth}"
-        )
-
-        line3 = (
-            f"BEST {best_move}   "
-            f"LINE (NOT PLAYED) {pv}"
-        )
-
-        cv2.putText(
-            display_frame,
-            line1,
-            (
-                8,
-                panel_top + 17
-            ),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.42,
-            (255, 255, 255),
-            1
-        )
-
-        cv2.putText(
-            display_frame,
-            line2,
-            (
-                8,
-                panel_top + 35
-            ),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.38,
-            (0, 255, 255),
-            1
-        )
-
-        cv2.putText(
-            display_frame,
-            line3,
-            (
-                8,
-                panel_top + 52
-            ),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.34,
-            (220, 220, 220),
-            1
-        )
-
-    bottom_color = (
-        "BLACK"
-        if stockfish_color == chess.BLACK
-        else "WHITE"
+    move_text = getattr(
+        draw_overlay,
+        "_move_history_text",
+        ""
     )
 
-    top_color = (
-        "BLACK"
-        if human_color == chess.BLACK
-        else "WHITE"
+    if not move_text:
+        return
+
+    tokens = move_text.split(
+        "  "
+    )
+
+    max_lines = 16
+    if len(tokens) > max_lines:
+        tokens = tokens[-max_lines:]
+
+    panel_w = min(
+        420,
+        max(
+            280,
+            int(width * 0.34)
+        )
+    )
+    line_h = 21
+    header_h = 12
+    panel_h = 18 + header_h + (
+        len(tokens)
+        * line_h
+    )
+
+    x, y, w, h = board_coords
+
+    if (
+        x + w + panel_w + 18
+        <= width
+    ):
+        panel_x = x + w + 10
+        panel_y = max(
+            54,
+            min(
+                y,
+                height - panel_h - 10
+            )
+        )
+    else:
+        panel_x = 10
+        panel_y = 54
+
+    overlay = display_frame.copy()
+
+    cv2.rectangle(
+        overlay,
+        (
+            panel_x,
+            panel_y
+        ),
+        (
+            panel_x + panel_w,
+            panel_y + panel_h
+        ),
+        (10, 10, 10),
+        -1
+    )
+
+    cv2.addWeighted(
+        overlay,
+        0.88,
+        display_frame,
+        0.12,
+        0,
+        display_frame
     )
 
     cv2.putText(
         display_frame,
+        "MOVES",
         (
-            f"TOP:{top_color} HUMAN  "
-            f"BOTTOM:{bottom_color} STOCKFISH"
+            panel_x + 10,
+            panel_y + 16
         ),
-        (8, 38),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.40,
+        0.48,
         (255, 255, 255),
-        1
+        1,
+        cv2.LINE_AA
     )
+
+    text_y = panel_y + 35
+
+    for token in tokens:
+        cv2.putText(
+            display_frame,
+            token,
+            (
+                panel_x + 10,
+                text_y
+            ),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.43,
+            (235, 235, 235),
+            1,
+            cv2.LINE_AA
+        )
+
+        text_y += line_h
 
 
 def format_board_for_screen(
@@ -321,8 +428,12 @@ def format_board_for_screen(
 
 
 def format_move_history(
-    board
+    board,
+    rank_history=None
 ):
+    if rank_history is None:
+        rank_history = {}
+
     temp = chess.Board(
         INITIAL_FEN
     )
@@ -330,30 +441,36 @@ def format_move_history(
     moves = []
     move_number = 1
 
-    for idx, move in enumerate(
-        board.move_stack
+    for ply_index, move in enumerate(
+        board.move_stack,
+        start=1
     ):
+        san = temp.san(
+            move
+        )
+
+        rank = rank_history.get(
+            ply_index
+        )
+
+        rank_text = (
+            f" [RANK #{int(rank)}]"
+            if rank is not None
+            else ""
+        )
+
         if temp.turn == chess.WHITE:
-            san = temp.san(
-                move
-            )
-
             moves.append(
-                f"{move_number}. {san}"
+                f"{move_number}. {san}{rank_text}"
             )
-
         else:
-            san = temp.san(
-                move
-            )
-
             if moves:
                 moves[-1] += (
-                    f" {san}"
+                    f" {san}{rank_text}"
                 )
             else:
                 moves.append(
-                    f"{move_number}... {san}"
+                    f"{move_number}... {san}{rank_text}"
                 )
 
             move_number += 1
@@ -363,7 +480,7 @@ def format_move_history(
         )
 
     return (
-        " ".join(moves)
+        "  ".join(moves)
         if moves
         else "-"
     )
@@ -377,102 +494,25 @@ def print_game_state(
     message="",
     analysis_state=None
 ):
-    os.system(
-        "cls"
-        if os.name == "nt"
-        else "clear"
+    builtins_module = __import__(
+        "builtins"
     )
 
-    print(
-        "============================================================"
+    real_print = getattr(
+        builtins_module,
+        "_chess_original_print",
+        builtins_module.print
     )
 
-    print(
-        "             LOCAL CHESS - HUMAN vs STOCKFISH"
+    rank_history = getattr(
+        draw_overlay,
+        "_rank_history",
+        {}
     )
 
-    print(
-        "============================================================"
+    real_print(
+        f"[MOVES] {format_move_history(board, rank_history)}",
+        flush=True
     )
-
-    print(
-        f"Stockfish: "
-        f"{'WHITE' if stockfish_color == chess.WHITE else 'BLACK'}"
-        f" | Human: "
-        f"{'WHITE' if human_color == chess.WHITE else 'BLACK'}"
-    )
-
-    if message:
-        print(
-            f"\n{message}\n"
-        )
-
-    turn_text = (
-        "WHITE"
-        if board.turn == chess.WHITE
-        else "BLACK"
-    )
-
-    controller = (
-        "STOCKFISH"
-        if board.turn == stockfish_color
-        else "HUMAN"
-    )
-
-    print(
-        f"Turn: {turn_text} / {controller}"
-    )
-
-    if SHOW_TERMINAL_FEN:
-        print(
-            f"FEN: {board.fen()}"
-        )
-
-    if analysis_state is not None:
-        print(
-            "\n[ANALYSIS]"
-        )
-
-        print(
-            f"EVAL: "
-            f"{analysis_state.get('eval_text', '--')} "
-            f"| FAVOR: "
-            f"{analysis_state.get('favor', '--')} "
-            f"| QUALITY: "
-            f"{analysis_state.get('quality', '--')}"
-        )
-
-        print(
-            f"LAST: "
-            f"{analysis_state.get('last_move', '--')} "
-            f"| BEST: "
-            f"{analysis_state.get('best_move', '--')} "
-            f"| DEPTH: "
-            f"{analysis_state.get('depth', '--')}"
-        )
-
-        print(
-            "ENGINE LINE (PREDICTION): "
-            f"{analysis_state.get('pv', '--')}"
-        )
-
-    print(
-        f"\n[MOVES] "
-        f"{format_move_history(board)}"
-    )
-
-    if SHOW_TERMINAL_BOARD:
-        print(
-            "\n[VERIFIED BOARD]"
-        )
-
-        print(
-            format_board_for_screen(
-                board,
-                black_perspective
-            )
-        )
-
-    print()
 
 
