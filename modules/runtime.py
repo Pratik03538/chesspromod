@@ -32,40 +32,41 @@ def bootstrap_namespace(caller_name="main", caller_file=None):
         "__cached__": None,
     }
 
+    # Load every current top-level config statement in source order.
+    # This avoids stale position mappings when config.py gains new settings.
     config_text=CONFIG.read_text(encoding="utf-8")
     config_tree=ast.parse(config_text, filename=str(CONFIG))
-    config_nodes=config_tree.body
+    for node in config_tree.body:
+        wrapper=ast.Module(body=[node],type_ignores=[])
+        ast.fix_missing_locations(wrapper)
+        exec(compile(wrapper,str(CONFIG),"exec"),ns,ns)
 
-    # Map every generated module's function definitions by local order.
-    module_cache={}
-    def get_functions(filename):
-        if filename not in module_cache:
-            path=MODULES/filename
-            mt=path.read_text(encoding="utf-8")
-            tr=ast.parse(mt, filename=str(path))
-            module_cache[filename]=[n for n in tr.body if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef))]
-        return module_cache[filename]
+    # The manifest still defines the deterministic module load order, but
+    # function lookup is by function name and all current functions are loaded.
+    # This keeps the modular runtime valid when helper functions are added
+    # without having to regenerate positional indexes.
+    module_order=[]
+    for item in manifest["nodes"]:
+        if item["kind"] == "function":
+            module=item["module"]
+            if module not in module_order:
+                module_order.append(module)
 
-    for item in sorted(manifest["nodes"], key=lambda x:x["index"]):
-        kind=item["kind"]
-        if kind=="config":
-            node=config_nodes[item["position"]]
-            wrapper=ast.Module(body=[node],type_ignores=[])
-            ast.fix_missing_locations(wrapper)
-            exec(compile(wrapper,str(CONFIG),"exec"),ns,ns)
-        elif kind=="function":
-            fn=item["module"]
-            node=get_functions(fn)[item["position"]]
-            wrapper=ast.Module(body=[node],type_ignores=[])
-            ast.fix_missing_locations(wrapper)
-            exec(compile(wrapper,str(MODULES/fn),"exec"),ns,ns)
-        elif kind=="main_guard":
-            guard_text=GUARD.read_text(encoding="utf-8")
-            guard_tree=ast.parse(guard_text, filename=str(GUARD))
-            # Preserve original guard semantics exactly.
-            exec(compile(guard_tree,str(GUARD),"exec"),ns,ns)
-        else:
-            raise RuntimeError(f"Unknown manifest node kind: {kind}")
+    for filename in module_order:
+        path=MODULES/filename
+        source_text=path.read_text(encoding="utf-8")
+        module_tree=ast.parse(source_text, filename=str(path))
+
+        for node in module_tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                wrapper=ast.Module(body=[node],type_ignores=[])
+                ast.fix_missing_locations(wrapper)
+                exec(compile(wrapper,str(path),"exec"),ns,ns)
+
+    guard_text=GUARD.read_text(encoding="utf-8")
+    guard_tree=ast.parse(guard_text, filename=str(GUARD))
+    # Preserve the original __main__ guard semantics.
+    exec(compile(guard_tree,str(GUARD),"exec"),ns,ns)
 
     _NAMESPACE=ns
     return ns
