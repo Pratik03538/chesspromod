@@ -987,52 +987,25 @@ def main():
             return 0.0
 
     def detect_new_game_button(frame):
-        """Detect New controls on result and aborted-game screens."""
+        """Detect the completed-game Rematch and New controls only."""
         detect_new_game_button._abort_layout = False
+        detect_new_game_button._rematch_button_center = None
+        detect_new_game_button._new_game_button_center = None
 
         if frame is None:
             return None
 
         try:
-            completed_only = bool(
-                getattr(
-                    detect_new_game_button,
-                    "_completed_only",
-                    False
-                )
-            )
-
             height, width = frame.shape[:2]
 
-            button_x1 = int(width * 0.46)
-            button_x2 = int(width * 0.88)
-            button_y1 = int(height * 0.32)
-            button_y2 = int(height * 0.40)
-
-            button_roi = frame[
-                button_y1:button_y2,
-                button_x1:button_x2
-            ]
-
-            gray = cv2.cvtColor(
-                button_roi,
-                cv2.COLOR_BGR2GRAY
-            )
-
-            white_fraction = float(
-                np.mean(gray > 175)
-            )
-
-            dark_fraction = float(
-                np.mean(gray < 100)
-            )
-
-            # Completed result screen has TWO dark buttons in the
-            # upper-middle area: Rematch on the left and New
-            # <time-control> on the right. Detect that pair directly,
-            # without using green color, because Game Review is green.
-            top_y1 = int(height * 0.345)
-            top_y2 = int(height * 0.425)
+            # Completed Chess result screen:
+            # left = Rematch
+            # right = New <time-control>
+            #
+            # Deliberately ignore every green/yellow/blue control elsewhere
+            # on the page, including Game Review.
+            top_y1 = int(height * 0.325)
+            top_y2 = int(height * 0.435)
 
             top_roi = frame[
                 top_y1:top_y2,
@@ -1045,9 +1018,9 @@ def main():
             )
 
             dark_neutral = (
-                (top_hsv[:, :, 1] < 25)
-                & (top_hsv[:, :, 2] >= 40)
-                & (top_hsv[:, :, 2] <= 85)
+                (top_hsv[:, :, 1] < 32)
+                & (top_hsv[:, :, 2] >= 35)
+                & (top_hsv[:, :, 2] <= 100)
             ).astype(
                 np.uint8
             )
@@ -1078,163 +1051,60 @@ def main():
                 by += top_y1
 
                 if not (
-                    bw >= width * 0.30
-                    and bh >= height * 0.02
+                    bw >= width * 0.25
+                    and bh >= height * 0.025
                     and bw / float(max(1, bh)) >= 3.0
-                    and by >= int(height * 0.345)
-                    and by + bh <= int(height * 0.425)
+                    and by >= int(height * 0.325)
+                    and by + bh <= int(height * 0.435)
                 ):
                     continue
 
                 center_x = bx + bw / 2.0
+                box = (
+                    bx,
+                    by,
+                    bw,
+                    bh
+                )
 
-                if center_x < width * 0.46:
+                if center_x < width * 0.50:
                     if (
                         left_button is None
                         or bw * bh > left_button[2] * left_button[3]
                     ):
-                        left_button = (
-                            bx,
-                            by,
-                            bw,
-                            bh
-                        )
+                        left_button = box
 
-                elif center_x > width * 0.46:
+                else:
                     if (
                         right_button is None
                         or bw * bh > right_button[2] * right_button[3]
                     ):
-                        right_button = (
-                            bx,
-                            by,
-                            bw,
-                            bh
-                        )
+                        right_button = box
 
-            if (
-                left_button is not None
-                and right_button is not None
-            ):
-                detect_new_game_button._abort_layout = False
-
-                bx, by, bw, bh = right_button
-
-                return (
-                    int(bx + bw / 2),
-                    int(by + bh / 2)
-                )
-
-            # No upper Rematch/New pair. Never use the lower green
-            # control on a completed result screen because that area can be
-            # Game Review. Green fallback is only for aborted layouts.
-            if completed_only:
+            if left_button is None or right_button is None:
                 return None
 
-            full_hsv = cv2.cvtColor(
-                frame,
-                cv2.COLOR_BGR2HSV
-            )
-            lower_y1 = int(height * 0.48)
-            lower_roi = full_hsv[
-                lower_y1:,
-                :
-            ]
+            l_x, l_y, l_w, l_h = left_button
+            r_x, r_y, r_w, r_h = right_button
 
-            lower_green = (
-                (lower_roi[:, :, 0] >= 30)
-                & (lower_roi[:, :, 0] <= 95)
-                & (lower_roi[:, :, 1] >= 70)
-                & (lower_roi[:, :, 2] >= 70)
-            ).astype(
-                np.uint8
+            detect_new_game_button._rematch_button_center = (
+                int(l_x + l_w / 2),
+                int(l_y + l_h / 2)
             )
 
-            lower_green = cv2.morphologyEx(
-                lower_green,
-                cv2.MORPH_CLOSE,
-                np.ones(
-                    (5, 5),
-                    np.uint8
-                )
+            detect_new_game_button._new_game_button_center = (
+                int(r_x + r_w / 2),
+                int(r_y + r_h / 2)
             )
 
-            contours, _ = cv2.findContours(
-                lower_green,
-                cv2.RETR_EXTERNAL,
-                cv2.CHAIN_APPROX_SIMPLE
-            )
-
-            candidates = []
-
-            for contour in contours:
-                x, y, w, h = cv2.boundingRect(
-                    contour
-                )
-
-                area = w * h
-                aspect = (
-                    w / float(h)
-                    if h > 0
-                    else 0.0
-                )
-
-                if (
-                    area >= width * height * 0.006
-                    and w >= width * 0.16
-                    and h >= max(
-                        18,
-                        int(height * 0.015)
-                    )
-                    and aspect >= 2.0
-                ):
-                    candidates.append(
-                        (
-                            area,
-                            x,
-                            y + lower_y1,
-                            w,
-                            h
-                        )
-                    )
-
-            if not candidates:
-                return None
-
-            lower_action_candidates = [
-                candidate
-                for candidate in candidates
-                if (
-                    candidate[2] + candidate[4] / 2.0
-                    >= height * 0.68
-                    and candidate[1] + candidate[3] / 2.0
-                    >= width * 0.15
-                    and candidate[1] + candidate[3] / 2.0
-                    <= width * 0.65
-                )
-            ]
-
-            if not lower_action_candidates:
-                return None
-
-            # On the aborted layout, the actual New button is the lower
-            # action control. The higher Game Review control is ignored.
-            _, x, y, w, h = max(
-                lower_action_candidates,
-                key=lambda item: (
-                    item[2] + item[4] / 2.0,
-                    item[0]
-                )
-            )
-
-            detect_new_game_button._abort_layout = True
-
-            return (
-                int(x + w / 2),
-                int(y + h / 2)
-            )
+            # The returned center remains the New button so existing
+            # stability bookkeeping continues to track the right-side action.
+            return detect_new_game_button._new_game_button_center
 
         except Exception:
+            detect_new_game_button._rematch_button_center = None
+            detect_new_game_button._new_game_button_center = None
+            detect_new_game_button._abort_layout = False
             return None
 
     def wait_for_initial_match(
@@ -2116,12 +1986,9 @@ def main():
                     and cached_board_coords
                     and not awaiting_new_match
                 ):
-                    detect_new_game_button._completed_only = (
-                        board.is_game_over()
-                    )
-
-                    # Completed results are restricted to the upper dark
-                    # Rematch + New pair. This explicitly ignores Game Review.
+                    # Result handling is based only on the completed-game
+                    # upper Rematch + New controls. Ignore every lower/green
+                    # control such as Game Review.
                     result_button = detect_new_game_button(
                         frame
                     )
@@ -2146,7 +2013,6 @@ def main():
                         result_screen = (
                             board.is_game_over()
                             or normal_result_layout
-                            or result_obstruction > 0.10
                         )
 
                         if result_screen:
@@ -2284,31 +2150,29 @@ def main():
                                             )
                                         )
 
-                                        if (
-                                            board.is_game_over()
-                                            or detect_new_game_button._abort_layout
-                                        ):
-                                            use_rematch = False
+                                        new_button_center = (
+                                            getattr(
+                                                detect_new_game_button,
+                                                "_new_game_button_center",
+                                                None
+                                            )
+                                            or result_button
+                                        )
+
+                                        rematch_button_center = getattr(
+                                            detect_new_game_button,
+                                            "_rematch_button_center",
+                                            None
+                                        )
 
                                         action_button = (
-                                            (
-                                                int(
-                                                    frame.shape[1]
-                                                    * 0.565
-                                                ),
-                                                int(
-                                                    frame.shape[0]
-                                                    * 0.392
-                                                )
-                                            )
+                                            rematch_button_center
                                             if use_rematch
-                                            else result_button
+                                            else new_button_center
                                         )
 
-                                        clicked_normal_result_new = (
-                                            not use_rematch
-                                            and not detect_new_game_button._abort_layout
-                                        )
+                                        if action_button is None:
+                                            continue
 
                                         # Small random wait before every result-page
                                         # action. This is intentionally a floating-point
@@ -2489,21 +2353,29 @@ def main():
                                                         >= 0.025
                                                     )
 
-                                                # For completed results, the upper dark New
-                                                # button must disappear or stop being
-                                                # detectable. Game Review is not considered.
-                                                detect_new_game_button._completed_only = (
-                                                    board.is_game_over()
+                                                # Confirm the SAME result action that was
+                                                # clicked. Green/yellow/blue controls are never
+                                                # used as acknowledgement.
+                                                detect_new_game_button(
+                                                    ack_frame
                                                 )
 
-                                                remaining_target = (
-                                                    detect_new_game_button(
-                                                        ack_frame
+                                                remaining_action = (
+                                                    getattr(
+                                                        detect_new_game_button,
+                                                        "_rematch_button_center",
+                                                        None
+                                                    )
+                                                    if use_rematch
+                                                    else getattr(
+                                                        detect_new_game_button,
+                                                        "_new_game_button_center",
+                                                        None
                                                     )
                                                 )
 
                                                 target_gone = (
-                                                    remaining_target is None
+                                                    remaining_action is None
                                                 )
 
                                                 if (
