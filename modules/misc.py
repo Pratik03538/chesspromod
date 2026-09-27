@@ -3453,14 +3453,30 @@ def main():
                                     )
 
                                     if "MATE" in selection_reason:
-                                        mate_match = re.search(
-                                            r"M(\d+)",
-                                            selection_reason
+                                        mate_marker = "TARGET=M"
+                                        mate_pos = selection_reason.find(
+                                            mate_marker
                                         )
 
-                                        if mate_match:
-                                            mate_distance = int(
-                                                mate_match.group(1)
+                                        if mate_pos >= 0:
+                                            mate_start = (
+                                                mate_pos
+                                                + len(mate_marker)
+                                            )
+                                            mate_digits = ""
+
+                                            while (
+                                                mate_start
+                                                < len(selection_reason)
+                                                and selection_reason[mate_start].isdigit()
+                                            ):
+                                                mate_digits += selection_reason[mate_start]
+                                                mate_start += 1
+
+                                            mate_distance = (
+                                                int(mate_digits)
+                                                if mate_digits
+                                                else 99
                                             )
 
                                             if mate_distance <= 1:
