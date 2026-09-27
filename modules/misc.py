@@ -690,13 +690,20 @@ def main():
         nonlocal current_game_started_datetime
         nonlocal next_game_number
 
-        from datetime import datetime as _PgnDateTime
-        from zoneinfo import ZoneInfo as _PgnZoneInfo
+        from datetime import (
+            datetime as _PgnDateTime,
+            timezone as _PgnTimezone,
+            timedelta as _PgnTimedelta
+        )
+
+        _IST = _PgnTimezone(
+            _PgnTimedelta(hours=5, minutes=30)
+        )
 
         current_game_number = next_game_number
         current_game_started_at = time.perf_counter()
         current_game_started_datetime = _PgnDateTime.now(
-            _PgnZoneInfo("Asia/Kolkata")
+            _IST
         )
 
         draw_overlay._game_number = current_game_number
@@ -762,15 +769,21 @@ def main():
         import time as _pgn_time
         import datetime as _pgn_datetime
         import chess.pgn as _chess_pgn
-        from zoneinfo import ZoneInfo as _PgnZoneInfo
 
         outcome = game_board.outcome()
 
-        from datetime import datetime as _PgnDateTime
-        from zoneinfo import ZoneInfo as _PgnZoneInfo
+        from datetime import (
+            datetime as _PgnDateTime,
+            timezone as _PgnTimezone,
+            timedelta as _PgnTimedelta
+        )
+
+        _IST = _PgnTimezone(
+            _PgnTimedelta(hours=5, minutes=30)
+        )
 
         end_datetime = _PgnDateTime.now(
-            _PgnZoneInfo("Asia/Kolkata")
+            _IST
         )
 
         start_datetime = (
@@ -803,7 +816,7 @@ def main():
             )
 
         now = _pgn_datetime.datetime.now(
-            _PgnZoneInfo("Asia/Kolkata")
+            _IST
         )
         date_text = start_datetime.strftime("%Y.%m.%d")
         time_text = start_datetime.strftime("%H:%M:%S")
