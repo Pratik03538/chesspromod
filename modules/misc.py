@@ -2060,9 +2060,19 @@ def main():
                     and cached_board_coords
                     and not awaiting_new_match
                 ):
-                    result_button = detect_new_game_button(
-                        frame
-                    )
+                    # A completed chess game uses the normal result layout.
+                    # Never mistake the lower green Game Review button for
+                    # the New-button target.
+                    if board.is_game_over():
+                        result_button = (
+                            int(frame.shape[1] * 0.735),
+                            int(frame.shape[0] * 0.392)
+                        )
+                        detect_new_game_button._abort_layout = False
+                    else:
+                        result_button = detect_new_game_button(
+                            frame
+                        )
 
                     if result_button is not None:
                         result_obstruction = 0.0
