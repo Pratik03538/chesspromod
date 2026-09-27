@@ -522,23 +522,49 @@ def click_move(
         )
         return False
 
-    # Keep the original drag behavior, but avoid a perfectly straight
-    # source->target cursor path. A tiny perpendicular offset is used at
-    # the midpoint, so the gesture remains fast while looking less robotic.
-    sx, sy = square_screen_center(
-        move.from_square,
-        board_coords,
-        black_perspective,
-        scrcpy_hwnd,
-        screen_origin=screen_origin
+    # Pick source and target inside the existing 40% circular touch area.
+    # The exact center is intentionally excluded.
+    def random_touch_point(square):
+        cx, cy = square_screen_center(
+            square,
+            board_coords,
+            black_perspective,
+            scrcpy_hwnd,
+            screen_origin=screen_origin
+        )
+
+        square_w = float(board_coords[2]) / 8.0
+        square_h = float(board_coords[3]) / 8.0
+        radius = min(
+            square_w,
+            square_h
+        ) * CLICK_CIRCLE_RADIUS_FRACTION
+
+        min_radius = radius * 0.18
+
+        angle = random.uniform(
+            0.0,
+            2.0 * math.pi
+        )
+
+        radial = math.sqrt(
+            random.uniform(
+                min_radius * min_radius,
+                radius * radius
+            )
+        )
+
+        return (
+            int(round(cx + math.cos(angle) * radial)),
+            int(round(cy + math.sin(angle) * radial))
+        )
+
+    sx, sy = random_touch_point(
+        move.from_square
     )
 
-    tx, ty = square_screen_center(
-        move.to_square,
-        board_coords,
-        black_perspective,
-        scrcpy_hwnd,
-        screen_origin=screen_origin
+    tx, ty = random_touch_point(
+        move.to_square
     )
 
     dx = float(tx - sx)
@@ -548,34 +574,89 @@ def click_move(
         math.hypot(dx, dy)
     )
 
-    # Small sideways deviation: 2-6 px, capped so short moves stay tight.
-    offset = min(
-        6.0,
-        max(
-            2.0,
-            distance * 0.035
-        )
-    )
-
     nx = -dy / distance
     ny = dx / distance
 
-    bend_sign = random.choice((-1.0, 1.0))
+    # Two independently randomized control offsets create a different
+    # curved path for every drag.
+    bend_limit = min(
+        28.0,
+        max(
+            6.0,
+            distance * 0.10
+        )
+    )
 
-    mid_x = (
-        (sx + tx) * 0.5
-        + nx * offset * bend_sign
+    bend_1 = random.uniform(
+        bend_limit * 0.45,
+        bend_limit
+    ) * random.choice(
+        (-1.0, 1.0)
     )
-    mid_y = (
-        (sy + ty) * 0.5
-        + ny * offset * bend_sign
+
+    bend_2 = random.uniform(
+        bend_limit * 0.35,
+        bend_limit * 0.90
+    ) * random.choice(
+        (-1.0, 1.0)
     )
+
+    control_1_x = (
+        sx
+        + dx * random.uniform(0.25, 0.38)
+        + nx * bend_1
+    )
+    control_1_y = (
+        sy
+        + dy * random.uniform(0.25, 0.38)
+        + ny * bend_1
+    )
+
+    control_2_x = (
+        sx
+        + dx * random.uniform(0.62, 0.78)
+        + nx * bend_2
+    )
+    control_2_y = (
+        sy
+        + dy * random.uniform(0.62, 0.78)
+        + ny * bend_2
+    )
+
+    path_points = []
+
+    for index in range(
+        1,
+        7
+    ):
+        t = index / 7.0
+        one_minus = 1.0 - t
+
+        px = (
+            one_minus ** 3 * sx
+            + 3.0 * one_minus ** 2 * t * control_1_x
+            + 3.0 * one_minus * t ** 2 * control_2_x
+            + t ** 3 * tx
+        )
+        py = (
+            one_minus ** 3 * sy
+            + 3.0 * one_minus ** 2 * t * control_1_y
+            + 3.0 * one_minus * t ** 2 * control_2_y
+            + t ** 3 * ty
+        )
+
+        path_points.append(
+            (
+                int(round(px)),
+                int(round(py))
+            )
+        )
 
     print(
         f"[BOT DRAG] {move.uci()} "
         f"source=({sx},{sy}) "
-        f"mid=({int(mid_x)},{int(mid_y)}) "
-        f"target=({tx},{ty})"
+        f"target=({tx},{ty}) "
+        f"path={path_points}"
     )
 
     user32.SetCursorPos(
@@ -583,17 +664,19 @@ def click_move(
         0
     )
 
-    # Move to source.
     user32.SetCursorPos(
         int(sx),
         int(sy)
     )
 
+    # Only millisecond-level movement timing for bullet play.
     time.sleep(
-        0.020
+        random.uniform(
+            0.004,
+            0.010
+        )
     )
 
-    # One continuous drag gesture.
     user32.mouse_event(
         MOUSEEVENTF_LEFTDOWN,
         0,
@@ -603,27 +686,45 @@ def click_move(
     )
 
     time.sleep(
-        0.035
+        random.uniform(
+            0.008,
+            0.018
+        )
     )
 
-    # Slightly bent midpoint instead of a perfectly straight cursor line.
-    user32.SetCursorPos(
-        int(mid_x),
-        int(mid_y)
-    )
+    previous_x = sx
+    previous_y = sy
+
+    for px, py in path_points:
+        user32.SetCursorPos(
+            px,
+            py
+        )
+
+        segment_distance = math.hypot(
+            px - previous_x,
+            py - previous_y
+        )
+
+        time.sleep(
+            random.uniform(
+                0.0015,
+                0.0045
+            )
+            + min(
+                0.002,
+                segment_distance / 80000.0
+            )
+        )
+
+        previous_x = px
+        previous_y = py
 
     time.sleep(
-        0.012
-    )
-
-    # Final destination while still holding the mouse button.
-    user32.SetCursorPos(
-        int(tx),
-        int(ty)
-    )
-
-    time.sleep(
-        0.020
+        random.uniform(
+            0.004,
+            0.010
+        )
     )
 
     user32.mouse_event(
@@ -639,9 +740,11 @@ def click_move(
         0
     )
 
-    # Let scrcpy/Android settle the completed drag before verification.
     time.sleep(
-        0.018
+        random.uniform(
+            0.004,
+            0.010
+        )
     )
 
     if move.promotion is not None:
@@ -672,7 +775,6 @@ def click_move(
         return promotion_ok
 
     return True
-
 
 def safe_drop_fraction(
     current_cp
