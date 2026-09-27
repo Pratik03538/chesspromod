@@ -345,12 +345,16 @@ def draw_overlay(
         cv2.LINE_AA
     )
 
+    game_time_text = (
+        f"TIME {int(game_elapsed // 60):02d}:"
+        f"{int(game_elapsed % 60):02d}"
+        if match_state == "PLAYING"
+        else "TIME --:--"
+    )
+
     cv2.putText(
         display_frame,
-        (
-            f"TIME {int(game_elapsed // 60):02d}:"
-            f"{int(game_elapsed % 60):02d}"
-        ),
+        game_time_text,
         (
             panel_x + 12,
             panel_y + 84
