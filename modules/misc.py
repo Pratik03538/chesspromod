@@ -663,6 +663,44 @@ def main():
     new_match_scan_ms = 0.0
     next_manual_new_match_check = 0.0
     game_pgn_saved = False
+    current_game_number = None
+    current_game_started_at = None
+    current_game_started_datetime = None
+
+    try:
+        _pgn_scan_folder = os.path.join(
+            os.getcwd(),
+            "pgn_games"
+        )
+        _existing_pgn_count = len([
+            name
+            for name in os.listdir(_pgn_scan_folder)
+            if name.lower().endswith(".pgn")
+        ])
+    except Exception:
+        _existing_pgn_count = 0
+
+    next_game_number = _existing_pgn_count + 1
+
+    def begin_game_session():
+        nonlocal current_game_number
+        nonlocal current_game_started_at
+        nonlocal current_game_started_datetime
+        nonlocal next_game_number
+
+        from datetime import datetime as _PgnDateTime
+        from zoneinfo import ZoneInfo as _PgnZoneInfo
+
+        current_game_number = next_game_number
+        next_game_number += 1
+
+        current_game_started_at = time.perf_counter()
+        current_game_started_datetime = _PgnDateTime.now(
+            _PgnZoneInfo("Asia/Kolkata")
+        )
+
+        draw_overlay._game_number = current_game_number
+        draw_overlay._game_started_at = current_game_started_at
 
     def set_bot_ui_state(label):
         now_state = time.perf_counter()
@@ -675,6 +713,39 @@ def main():
         if current_state != label:
             draw_overlay._bot_state = label
             draw_overlay._bot_state_since = now_state
+
+            try:
+                if (
+                    display_frame is not None
+                    and cached_board_coords is not None
+                ):
+                    draw_overlay(
+                        display_frame,
+                        cached_board_coords,
+                        cached_board_grid,
+                        grid_locked,
+                        visual_black_perspective,
+                        last_scan_time_ms,
+                        "READY",
+                        (
+                            stockfish_color
+                            if stockfish_color is not None
+                            else chess.BLACK
+                        ),
+                        (
+                            human_color
+                            if human_color is not None
+                            else chess.WHITE
+                        ),
+                        analysis_state
+                    )
+                    cv2.imshow(
+                        "Chess Vision Tracker",
+                        display_frame
+                    )
+                    cv2.waitKey(1)
+            except Exception:
+                pass
 
     draw_overlay._match_state = "WAITING"
     draw_overlay._bot_state = "WAITING"
@@ -693,6 +764,28 @@ def main():
         from zoneinfo import ZoneInfo as _PgnZoneInfo
 
         outcome = game_board.outcome()
+
+        from datetime import datetime as _PgnDateTime
+        from zoneinfo import ZoneInfo as _PgnZoneInfo
+
+        end_datetime = _PgnDateTime.now(
+            _PgnZoneInfo("Asia/Kolkata")
+        )
+
+        start_datetime = (
+            current_game_started_datetime
+            if current_game_started_datetime is not None
+            else end_datetime
+        )
+
+        duration_seconds = (
+            max(
+                0.0,
+                time.perf_counter() - current_game_started_at
+            )
+            if current_game_started_at is not None
+            else 0.0
+        )
 
         if result is None:
             result = (
@@ -729,10 +822,26 @@ def main():
 
         game = _chess_pgn.Game()
         game.headers["Event"] = "Chess Vision Human vs Stockfish"
+        game.headers["Game"] = (
+            str(current_game_number)
+            if current_game_number is not None
+            else "?"
+        )
         game.headers["Date"] = date_text
         game.headers["Time"] = time_text
         game.headers["Timestamp"] = timestamp_text
         game.headers["Timezone"] = "Asia/Kolkata (UTC+05:30)"
+        game.headers["StartTime"] = start_datetime.strftime(
+            "%Y-%m-%d %H:%M:%S %z"
+        )
+        game.headers["EndTime"] = end_datetime.strftime(
+            "%Y-%m-%d %H:%M:%S %z"
+        )
+        game.headers["Duration"] = (
+            f"{int(duration_seconds // 3600):02d}:"
+            f"{int((duration_seconds % 3600) // 60):02d}:"
+            f"{int(duration_seconds % 60):02d}"
+        )
         game.headers["White"] = (
             "Stockfish"
             if stockfish_color == chess.WHITE
@@ -1508,6 +1617,11 @@ def main():
                     new_match_start_key = None
                     new_match_scan_ms = 0.0
                     next_manual_new_match_check = 0.0
+                    current_game_number = None
+                    current_game_started_at = None
+                    current_game_started_datetime = None
+                    draw_overlay._game_number = None
+                    draw_overlay._game_started_at = None
                     screen_interrupted = False
                     screen_interrupt_bad_samples = 0
                     screen_interrupt_clear_samples = 0
@@ -1699,6 +1813,7 @@ def main():
 
                             game_ready = True
                             game_pgn_saved = False
+                            begin_game_session()
                             analysis_state = None
 
                             draw_overlay._move_history_text = format_move_history(
@@ -2351,6 +2466,7 @@ def main():
                                     awaiting_new_match = False
                                     game_ready = True
                                     game_pgn_saved = False
+                                    begin_game_session()
 
                                     out_of_book = False
                                     analysis_state = None
