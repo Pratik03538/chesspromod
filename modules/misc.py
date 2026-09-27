@@ -1053,7 +1053,63 @@ def main():
                             )
                         )
 
-                status = "READY - PRESS R"
+
+                if (
+                    game_ready
+                    and grid_locked
+                    and stockfish_color is not None
+                    and not game_started
+                ):
+                    now = time.perf_counter()
+
+                    if (
+                        now - game_start_last_check
+                        >= GAME_START_POLL_INTERVAL
+                    ):
+                        (
+                            start_activity,
+                            start_mean,
+                            start_ratio
+                        ) = detect_game_start_activity(
+                            baseline_frame,
+                            game_start_previous_frame,
+                            frame,
+                            cached_board_coords
+                        )
+
+                        game_start_previous_frame = frame
+                        game_start_last_check = now
+
+                        if start_activity:
+                            game_start_hits += 1
+                        else:
+                            game_start_hits = 0
+
+                        if (
+                            game_start_hits
+                            >= GAME_START_CONFIRM_SAMPLES
+                        ):
+                            game_started = True
+                            game_start_hits = 0
+
+                            print(
+                                "[GAME START] "
+                                "External game activity detected; "
+                                "live turn handling enabled."
+                            )
+
+                            progress(
+                                "START",
+                                (
+                                    "game start detected "
+                                    f"(activity={start_mean:.4f}, "
+                                    f"changed={start_ratio:.3f})"
+                                ),
+                                key="game_start",
+                                force=True
+                            )
+
+                                status = "READY - PRESS R"
 
                 if (
                     grid_locked
