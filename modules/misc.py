@@ -2299,9 +2299,28 @@ def main():
                                             + action_button[1]
                                         )
 
-                                        left_click_screen(
-                                            click_x,
-                                            click_y
+                                        # Use a dedicated reliable press for the
+                                        # result-page New/Rematch control. The normal
+                                        # board-move click path stays untouched.
+                                        user32.SetCursorPos(
+                                            int(click_x),
+                                            int(click_y)
+                                        )
+                                        time.sleep(0.020)
+                                        user32.mouse_event(
+                                            MOUSEEVENTF_LEFTDOWN,
+                                            0,
+                                            0,
+                                            0,
+                                            0
+                                        )
+                                        time.sleep(0.030)
+                                        user32.mouse_event(
+                                            MOUSEEVENTF_LEFTUP,
+                                            0,
+                                            0,
+                                            0,
+                                            0
                                         )
 
                                         last_new_match_click = (
@@ -2343,6 +2362,77 @@ def main():
                                                 )
                                                 continue
 
+                                            if clicked_normal_result_new:
+                                                # For a completed result screen, never
+                                                # run the generic green-button detector
+                                                # during acknowledgement. It can see
+                                                # Game Review and incorrectly conclude
+                                                # that the click succeeded.
+                                                #
+                                                # Instead, compare the result-action
+                                                # region before/after the click. If the
+                                                # result page remains visually unchanged,
+                                                # the New click did not register and the
+                                                # normal retry mechanism must fire.
+                                                try:
+                                                    ry1 = int(
+                                                        frame.shape[0] * 0.33
+                                                    )
+                                                    ry2 = int(
+                                                        frame.shape[0] * 0.46
+                                                    )
+                                                    rx1 = int(
+                                                        frame.shape[1] * 0.03
+                                                    )
+                                                    rx2 = int(
+                                                        frame.shape[1] * 0.97
+                                                    )
+
+                                                    before_region = frame[
+                                                        ry1:ry2,
+                                                        rx1:rx2
+                                                    ]
+                                                    after_region = ack_frame[
+                                                        ry1:ry2,
+                                                        rx1:rx2
+                                                    ]
+
+                                                    if (
+                                                        before_region.size
+                                                        == 0
+                                                        or after_region.shape
+                                                        != before_region.shape
+                                                    ):
+                                                        button_still_present = False
+                                                        break
+
+                                                    delta = cv2.absdiff(
+                                                        before_region,
+                                                        after_region
+                                                    )
+                                                    changed_fraction = float(
+                                                        np.mean(
+                                                            np.max(
+                                                                delta,
+                                                                axis=2
+                                                            ) >= 18
+                                                        )
+                                                    )
+
+                                                    if changed_fraction >= 0.025:
+                                                        button_still_present = False
+                                                        break
+                                                except Exception:
+                                                    # If this visual acknowledgement
+                                                    # cannot be computed, keep waiting
+                                                    # so a later loop can retry safely.
+                                                    pass
+
+                                                time.sleep(
+                                                    0.03
+                                                )
+                                                continue
+
                                             ack_button = (
                                                 detect_new_game_button(
                                                     ack_frame
@@ -2350,20 +2440,6 @@ def main():
                                             )
 
                                             if ack_button is None:
-                                                button_still_present = False
-                                                break
-
-                                            # After clicking the normal completed-result
-                                            # New button, a lower green control such as
-                                            # Game Review must NEVER count as the same
-                                            # button for retry purposes. If the upper
-                                            # Rematch/New pair is gone, the click is
-                                            # considered acknowledged and no second
-                                            # click is sent to the result page.
-                                            if (
-                                                clicked_normal_result_new
-                                                and detect_new_game_button._abort_layout
-                                            ):
                                                 button_still_present = False
                                                 break
 
