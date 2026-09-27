@@ -12,7 +12,12 @@ Remove this module and its two small hooks when the experiment is finished.
 
 import math
 import statistics
+import sys
 import time
+
+
+def _print(*args):
+    sys.__stdout__.write(" ".join(str(x) for x in args) + "\n")
 
 
 _SESSION = {
@@ -128,14 +133,14 @@ def print_report(game_board=None):
 
     moves = _SESSION["moves"]
 
-    print("")
-    print("=" * 68)
-    print("              BOT HUMAN-BEHAVIOR ANALYSIS")
-    print("=" * 68)
+    _print("")
+    _print("=" * 68)
+    _print("              BOT HUMAN-BEHAVIOR ANALYSIS")
+    _print("=" * 68)
 
     if not moves:
-        print("No bot moves were recorded.")
-        print("=" * 68)
+        _print("No bot moves were recorded.")
+        _print("=" * 68)
         return
 
     timings = [
@@ -296,66 +301,66 @@ def print_report(game_board=None):
         + tactical_timing_score * 0.15
     )
 
-    print(
+    _print(
         f"Moves analyzed       : {len(moves)}"
     )
-    print(
+    _print(
         f"Thinking time        : avg={timing_mean:.3f}s "
         f"sd={timing_sd:.3f}s "
         f"range={min(timings):.3f}-{max(timings):.3f}s"
     )
-    print(
+    _print(
         f"Timing behavior      : {timing_score:.1f}/100"
     )
-    print(
+    _print(
         f"Cursor/touch samples : {len(touch)}/{len(moves)}"
     )
 
     if touch:
-        print(
+        _print(
             f"Drag execution       : avg={_mean(drag_times):.3f}s "
             f"path-ratio={_mean(path_ratios):.3f}"
         )
 
-    print(
+    _print(
         f"Cursor behavior      : {cursor_score:.1f}/100"
     )
-    print(
+    _print(
         "Move ranks           : "
         + ", ".join(
             f"#{rank}={rank_hist[rank]}"
             for rank in sorted(rank_hist)
         )
     )
-    print(
+    _print(
         f"Non-#1 selections     : "
         f"{non_top}/{len(ranks)} "
         f"({non_top / len(ranks) * 100.0:.1f}%)"
     )
-    print(
+    _print(
         f"Move preference      : {preference_score:.1f}/100"
     )
-    print(
+    _print(
         f"Tactical moves       : {tactical_count}/{len(moves)}"
     )
-    print(
+    _print(
         f"Tactical timing      : {tactical_timing_score:.1f}/100"
     )
 
     if gaps:
-        print(
+        _print(
             f"Selection eval gap   : avg={_mean(gaps) / 100.0:.2f} "
             f"pawn"
         )
 
-    print("-" * 68)
-    print(
+    _print("-" * 68)
+    _print(
         f"OVERALL BEHAVIOR SCORE: {overall:.1f}/100"
     )
-    print(
+    _print(
         "Note: this is an internal heuristic measurement of the bot's "
         "behavior, not a detector-evasion or guarantee of human identity."
     )
-    print("=" * 68)
+    _print("=" * 68)
 
     reset()
