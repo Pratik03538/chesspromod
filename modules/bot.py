@@ -534,9 +534,12 @@ def click_move(
         )
         return False
 
-    # Keep the original drag behavior, but avoid a perfectly straight
-    # source->target cursor path. A tiny perpendicular offset is used at
-    # the midpoint, so the gesture remains fast while looking less robotic.
+    # IMPORTANT:
+    # During the actual chess drag, use ONLY source -> final destination.
+    # Never place an intermediate cursor point on another chess square.
+    # A previous human-like midpoint could land exactly on an adjacent square
+    # (e.g. d7->b7 passed through c7) and the UI could register that square
+    # as the completed move.
     sx, sy = square_screen_center(
         move.from_square,
         board_coords,
@@ -553,44 +556,15 @@ def click_move(
         screen_origin=screen_origin
     )
 
-    dx = float(tx - sx)
-    dy = float(ty - sy)
-    distance = max(
-        1.0,
-        math.hypot(dx, dy)
-    )
-
-    # Small sideways deviation: 2-6 px, capped so short moves stay tight.
-    offset = min(
-        6.0,
-        max(
-            2.0,
-            distance * 0.035
-        )
-    )
-
-    nx = -dy / distance
-    ny = dx / distance
-
-    bend_sign = random.choice((-1.0, 1.0))
-
-    mid_x = (
-        (sx + tx) * 0.5
-        + nx * offset * bend_sign
-    )
-    mid_y = (
-        (sy + ty) * 0.5
-        + ny * offset * bend_sign
-    )
-
     print(
         f"[BOT DRAG] {move.uci()} "
         f"source=({sx},{sy}) "
-        f"mid=({int(mid_x)},{int(mid_y)}) "
         f"target=({tx},{ty})"
     )
 
-    # Move to source along a short, slightly curved/eased human-like path.
+    # Move to source along the existing human-like cursor path.
+    # This happens BEFORE mouse-down, so it cannot select an intermediate
+    # chess square as part of the actual chess move.
     try:
         point = wintypes.POINT()
         if user32.GetCursorPos(ctypes.byref(point)):
@@ -609,7 +583,10 @@ def click_move(
     )
 
     if source_distance < 3.0:
-        user32.SetCursorPos(int(sx), int(sy))
+        user32.SetCursorPos(
+            int(sx),
+            int(sy)
+        )
     else:
         source_steps = int(
             max(
@@ -623,7 +600,10 @@ def click_move(
 
         src_dx = float(sx - start_x)
         src_dy = float(sy - start_y)
-        src_inv_distance = 1.0 / max(source_distance, 1.0)
+        src_inv_distance = 1.0 / max(
+            source_distance,
+            1.0
+        )
         src_normal_x = -src_dy * src_inv_distance
         src_normal_y = src_dx * src_inv_distance
         src_max_bend = min(
@@ -638,10 +618,19 @@ def click_move(
             src_max_bend
         )
 
-        for source_step in range(1, source_steps + 1):
-            t = source_step / float(source_steps)
-            eased = t * t * (3.0 - 2.0 * t)
-            bend_factor = 4.0 * eased * (1.0 - eased)
+        for source_step in range(
+            1,
+            source_steps + 1
+        ):
+            t = source_step / float(
+                source_steps
+            )
+            eased = t * t * (
+                3.0 - 2.0 * t
+            )
+            bend_factor = 4.0 * eased * (
+                1.0 - eased
+            )
             jitter = (
                 random.uniform(
                     -CURSOR_PATH_JITTER_PX,
@@ -674,6 +663,12 @@ def click_move(
                     )
                 )
 
+    # Final source settle before mouse-down.
+    user32.SetCursorPos(
+        int(sx),
+        int(sy)
+    )
+
     time.sleep(
         random.uniform(
             CLICK_CURSOR_SETTLE_MIN,
@@ -681,7 +676,8 @@ def click_move(
         )
     )
 
-    # One continuous drag gesture.
+    # One continuous drag: source -> FINAL destination.
+    # No midpoint, no bend, no pause on an intermediate chess square.
     user32.mouse_event(
         MOUSEEVENTF_LEFTDOWN,
         0,
@@ -697,20 +693,6 @@ def click_move(
         )
     )
 
-    # Slightly bent midpoint instead of a perfectly straight cursor line.
-    user32.SetCursorPos(
-        int(mid_x),
-        int(mid_y)
-    )
-
-    time.sleep(
-        random.uniform(
-            CLICK_BETWEEN_MIN,
-            CLICK_BETWEEN_MAX
-        )
-    )
-
-    # Final destination while still holding the mouse button.
     user32.SetCursorPos(
         int(tx),
         int(ty)
@@ -721,6 +703,12 @@ def click_move(
             CLICK_CURSOR_SETTLE_MIN,
             CLICK_CURSOR_SETTLE_MAX
         )
+    )
+
+    # Re-assert the exact target immediately before release.
+    user32.SetCursorPos(
+        int(tx),
+        int(ty)
     )
 
     user32.mouse_event(
