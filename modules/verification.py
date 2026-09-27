@@ -622,37 +622,32 @@ def screen_matches_expected_bot_move(
     if not fast_ok:
         return False, fast_reason
 
-    # Pending/recovery confirmation keeps the fast exact
-    # source/destination gate for ordinary moves. Expensive complete-board
-    # verification remains for captures, castling, en-passant and promotion.
-    if (
-        board.is_capture(move)
-        or board.is_castling(move)
-        or board.is_en_passant(move)
-        or move.promotion is not None
-    ):
-        expected_after = expected_board_after_move(
-            board,
-            move
-        )
-        full_ok, full_reason = full_board_state_confirmed(
-            frame,
-            expected_after,
-            board_coords,
-            black_perspective
-        )
-        if not full_ok:
-            return False, (
-                "fast post-state passed but scrcpy full-board rejected: "
-                + full_reason
-            )
+    # Pending/recovery confirmation must use the complete expected board for
+    # every Stockfish move. Otherwise a missed physical click can be mistaken
+    # for a successful fast transition and the code may incorrectly advance
+    # the internal board instead of retrying the frozen move.
+    expected_after = expected_board_after_move(
+        board,
+        move
+    )
 
-        return True, (
-            "scrcpy full-board match 64/64; "
-            + fast_reason
+    full_ok, full_reason = full_board_state_confirmed(
+        frame,
+        expected_after,
+        board_coords,
+        black_perspective
+    )
+
+    if not full_ok:
+        return False, (
+            "fast post-state passed but scrcpy full-board rejected: "
+            + full_reason
         )
 
-    return True, fast_reason
+    return True, (
+        "scrcpy full-board match 64/64; "
+        + fast_reason
+    )
 
 
 def transition_confirmed(
@@ -802,25 +797,17 @@ def verify_bot_move(
             black_perspective
         )
         if ok:
-            # Normal moves use the fast closed-loop screen validation. Because
-            # before_frame is a previously verified complete board, the 64-square
-            # motion map proves that no unrelated square changed, and exact
-            # source/destination classification proves the requested piece moved.
-            # Captures/castling/promotion still get the strict full-board check.
-            strict_full = (
-                board.is_capture(move)
-                or board.is_castling(move)
-                or board.is_en_passant(move)
-                or move.promotion is not None
-            )
-
-            if not strict_full:
-                return True, after_frame, reason
-
+            # Fast motion/exact affected-square validation is only the first gate.
+            # The final authority is the complete physical chess position.
+            # Every Stockfish move must match the full expected board before
+            # the caller is allowed to advance python-chess. If the move never
+            # physically landed, this check fails and the existing retry path
+            # will click the same frozen move again.
             expected_after = expected_board_after_move(
                 board,
                 move
             )
+
             full_ok, full_reason = full_board_state_confirmed(
                 after_frame,
                 expected_after,
