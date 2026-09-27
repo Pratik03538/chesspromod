@@ -2308,9 +2308,27 @@ def main():
                                             result_click_delay
                                         )
 
-                                        # Re-capture immediately before the click so
-                                        # confirmation compares the actual result page
-                                        # immediately before vs immediately after.
+                                        click_x = (
+                                            origin[0]
+                                            + action_button[0]
+                                        )
+                                        click_y = (
+                                            origin[1]
+                                            + action_button[1]
+                                        )
+
+                                        # Put the cursor on the target first, then capture
+                                        # the reference frame. This prevents a hover-only
+                                        # visual change from being mistaken for a successful
+                                        # button click.
+                                        user32.SetCursorPos(
+                                            int(click_x),
+                                            int(click_y)
+                                        )
+                                        time.sleep(
+                                            0.020
+                                        )
+
                                         before_result_click_frame = capture_screen(
                                             sct,
                                             scrcpy_hwnd
@@ -2325,24 +2343,8 @@ def main():
                                             f"at ({action_button[0]},{action_button[1]})"
                                         )
 
-                                        click_x = (
-                                            origin[0]
-                                            + action_button[0]
-                                        )
-                                        click_y = (
-                                            origin[1]
-                                            + action_button[1]
-                                        )
-
-                                        # Reliable physical press/release. The cursor
-                                        # landing alone is NOT considered a click.
-                                        user32.SetCursorPos(
-                                            int(click_x),
-                                            int(click_y)
-                                        )
-                                        time.sleep(
-                                            0.020
-                                        )
+                                        # Reliable physical press/release. Cursor position
+                                        # alone is never treated as a click.
                                         user32.mouse_event(
                                             MOUSEEVENTF_LEFTDOWN,
                                             0,
@@ -2372,10 +2374,8 @@ def main():
                                             f"{new_match_click_attempts}/10"
                                         )
 
-                                        # Confirm the CLICK itself, not merely cursor
-                                        # position. For a completed result screen only
-                                        # the upper Rematch/New controls are relevant.
-                                        # Game Review is lower on the page and is ignored.
+                                        # Confirm the exact New/Rematch target itself.
+                                        # A Game Review click must never acknowledge success.
                                         click_ack_deadline = (
                                             time.perf_counter()
                                             + 1.50
@@ -2402,56 +2402,100 @@ def main():
                                                     ack_frame.shape[:2]
                                                 )
 
-                                                ry1 = int(
-                                                    height_ack * 0.33
+                                                ax1 = max(
+                                                    0,
+                                                    int(
+                                                        action_button[0]
+                                                        - width_ack * 0.16
+                                                    )
                                                 )
-                                                ry2 = int(
-                                                    height_ack * 0.46
+                                                ax2 = min(
+                                                    width_ack,
+                                                    int(
+                                                        action_button[0]
+                                                        + width_ack * 0.16
+                                                    )
                                                 )
-                                                rx1 = int(
-                                                    width_ack * 0.03
+                                                ay1 = max(
+                                                    0,
+                                                    int(
+                                                        action_button[1]
+                                                        - height_ack * 0.065
+                                                    )
                                                 )
-                                                rx2 = int(
-                                                    width_ack * 0.97
+                                                ay2 = min(
+                                                    height_ack,
+                                                    int(
+                                                        action_button[1]
+                                                        + height_ack * 0.065
+                                                    )
                                                 )
 
-                                                before_region = (
+                                                before_target = (
                                                     before_result_click_frame[
-                                                        ry1:ry2,
-                                                        rx1:rx2
+                                                        ay1:ay2,
+                                                        ax1:ax2
                                                     ]
                                                 )
-                                                after_region = ack_frame[
-                                                    ry1:ry2,
-                                                    rx1:rx2
+                                                after_target = ack_frame[
+                                                    ay1:ay2,
+                                                    ax1:ax2
                                                 ]
 
+                                                target_changed = False
+
                                                 if (
-                                                    before_region.size > 0
-                                                    and before_region.shape
-                                                    == after_region.shape
+                                                    before_target.size > 0
+                                                    and before_target.shape
+                                                    == after_target.shape
                                                 ):
-                                                    delta = cv2.absdiff(
-                                                        before_region,
-                                                        after_region
+                                                    target_delta = cv2.absdiff(
+                                                        before_target,
+                                                        after_target
                                                     )
-                                                    changed_fraction = float(
+
+                                                    target_changed_fraction = float(
                                                         np.mean(
                                                             np.max(
-                                                                delta,
+                                                                target_delta,
                                                                 axis=2
                                                             ) >= 18
                                                         )
                                                     )
 
-                                                    if changed_fraction >= 0.025:
-                                                        button_still_present = False
-                                                        print(
-                                                            "[MATCH] New-button CLICK CONFIRMED | "
-                                                            "result action area changed "
-                                                            f"{changed_fraction * 100.0:.1f}%"
-                                                        )
-                                                        break
+                                                    target_changed = (
+                                                        target_changed_fraction
+                                                        >= 0.025
+                                                    )
+
+                                                # For completed results, the upper dark New
+                                                # button must disappear or stop being
+                                                # detectable. Game Review is not considered.
+                                                detect_new_game_button._completed_only = (
+                                                    board.is_game_over()
+                                                )
+
+                                                remaining_target = (
+                                                    detect_new_game_button(
+                                                        ack_frame
+                                                    )
+                                                )
+
+                                                target_gone = (
+                                                    remaining_target is None
+                                                )
+
+                                                if (
+                                                    target_changed
+                                                    and target_gone
+                                                ):
+                                                    button_still_present = False
+                                                    print(
+                                                        "[MATCH] New-button CLICK CONFIRMED | "
+                                                        "target button changed and disappeared"
+                                                    )
+                                                    break
+
                                             except Exception as verify_error:
                                                 print(
                                                     "[MATCH] Click verification retry: "
