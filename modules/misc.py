@@ -1451,6 +1451,12 @@ def main():
 
 
                 if key == ord("r"):
+                    save_game_pgn(
+                        board,
+                        result="*",
+                        termination="grid reset"
+                    )
+
                     height, width = frame.shape[:2]
 
                     board_size = (
