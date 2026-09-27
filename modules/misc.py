@@ -994,6 +994,14 @@ def main():
             return None
 
         try:
+            completed_only = bool(
+                getattr(
+                    detect_new_game_button,
+                    "_completed_only",
+                    False
+                )
+            )
+
             height, width = frame.shape[:2]
 
             button_x1 = int(width * 0.46)
@@ -1117,9 +1125,12 @@ def main():
                     int(by + bh / 2)
                 )
 
-            # No upper Rematch/New pair: use the lower green New button
-            # only for the abort-screen layout. This prevents the green
-            # Game Review control from being selected on result screens.
+            # No upper Rematch/New pair. Never use the lower green
+            # control on a completed result screen because that area can be
+            # Game Review. Green fallback is only for aborted layouts.
+            if completed_only:
+                return None
+
             full_hsv = cv2.cvtColor(
                 frame,
                 cv2.COLOR_BGR2HSV
@@ -2084,21 +2095,15 @@ def main():
                     and cached_board_coords
                     and not awaiting_new_match
                 ):
-                    if board.is_game_over():
-                        # On a normal completed-game result screen, always use
-                        # the right-side New <time-control> button. Do not use
-                        # any lower green button such as Game Review.
-                        result_button = (
-                            int(frame.shape[1] * 0.735),
-                            int(frame.shape[0] * 0.392)
-                        )
-                        detect_new_game_button._abort_layout = False
-                    else:
-                        # Only aborted/incomplete games use the lower-screen
-                        # New button detector.
-                        result_button = detect_new_game_button(
-                            frame
-                        )
+                    detect_new_game_button._completed_only = (
+                        board.is_game_over()
+                    )
+
+                    # Completed results are restricted to the upper dark
+                    # Rematch + New pair. This explicitly ignores Game Review.
+                    result_button = detect_new_game_button(
+                        frame
+                    )
 
                     if result_button is not None:
                         result_obstruction = 0.0
