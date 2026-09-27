@@ -662,6 +662,8 @@ def main():
     new_match_start_key = None
     new_match_scan_ms = 0.0
     next_manual_new_match_check = 0.0
+    require_new_match_start_change = False
+    new_match_reference_frame = None
     game_pgn_saved = False
     current_game_number = None
     current_game_started_at = None
@@ -1541,6 +1543,8 @@ def main():
 
                                     awaiting_new_match = True
                                     game_ready = False
+                                    require_new_match_start_change = False
+                                    new_match_reference_frame = None
                                     cached_board_grid = None
                                     baseline_frame = None
 
@@ -1617,6 +1621,8 @@ def main():
                     new_match_start_key = None
                     new_match_scan_ms = 0.0
                     next_manual_new_match_check = 0.0
+                    require_new_match_start_change = False
+                    new_match_reference_frame = None
                     current_game_number = None
                     current_game_started_at = None
                     current_game_started_datetime = None
@@ -1756,90 +1762,44 @@ def main():
                             cached_board_grid = locked_grid
                             baseline_frame = locked_frame
 
-                            if human_color == chess.WHITE:
-                                first_move = detect_existing_white_first_move(
-                                    locked_frame,
-                                    board,
-                                    cached_board_coords,
-                                    visual_black_perspective
-                                )
+                            # R+L is setup only. A visible initial position is
+                            # not enough to declare GAME READY because the site
+                            # can show the board before a new match starts.
+                            awaiting_new_match = True
+                            game_ready = False
+                            require_new_match_start_change = True
+                            new_match_reference_frame = locked_frame
 
-                                if first_move is not None:
-                                    expected_first_board = expected_board_after_move(
-                                        board,
-                                        first_move
-                                    )
-
-                                    (
-                                        first_ok,
-                                        first_verified_frame,
-                                        first_reason
-                                    ) = verify_human_move_on_screen(
-                                        sct,
-                                        scrcpy_hwnd,
-                                        expected_first_board,
-                                        locked_frame,
-                                        cached_board_coords,
-                                        visual_black_perspective,
-                                        first_move,
-                                        board.copy(stack=False)
-                                    )
-
-                                    if first_ok:
-                                        san = board.san(first_move)
-                                        board.push(first_move)
-                                        baseline_frame = (
-                                            first_verified_frame
-                                            if first_verified_frame is not None
-                                            else locked_frame
-                                        )
-                                        print(
-                                            f"[SYNC] White-human first move detected: {first_move.uci()}"
-                                        )
-                                        print(
-                                            f"[SYNC] Board advanced to: {san}"
-                                        )
-                                        print(
-                                            f"[SYNC] Physical board verified: {first_reason}"
-                                        )
-                                        print(
-                                            f"[SYNC] Turn = {'BLACK' if board.turn == chess.BLACK else 'WHITE'} / "
-                                            f"{'STOCKFISH' if board.turn == stockfish_color else 'HUMAN'}"
-                                        )
-                                    else:
-                                        print(
-                                            f"[SYNC] First move rejected; internal board NOT advanced: {first_move.uci()} | {first_reason}"
-                                        )
-
-                            game_ready = True
                             game_pgn_saved = False
-                            begin_game_session()
-                            analysis_state = None
+                            current_game_number = None
+                            current_game_started_at = None
+                            current_game_started_datetime = None
+                            draw_overlay._game_number = None
+                            draw_overlay._game_started_at = None
 
-                            draw_overlay._move_history_text = format_move_history(
-                                board,
-                                draw_overlay._rank_history
-                            )
+                            analysis_state = None
+                            draw_overlay._rank_history.clear()
+                            draw_overlay._move_history_text = "-"
 
                             opponent_match_history.clear()
                             next_human_best_uci = None
                             opponent_pressure = False
-                            _advantage_progress_target_cp = None
-                            _advantage_progress_hold_moves = 0
-                            _advantage_progress_hold_limit = random.randint(
-                                HUMAN_ADVANTAGE_HOLD_MIN_MOVES,
-                                HUMAN_ADVANTAGE_HOLD_MAX_MOVES
-                            )
-                            _advantage_progress_side = None
                             last_bot_position_key = None
                             pending_bot_moves.clear()
+                            pending_recovered_human = None
 
-                            stockfish_moves_since_buffer = 0
-
-                            next_buffer_after = random.randint(
-                                RANDOM_BUFFER_MOVE_MIN,
-                                RANDOM_BUFFER_MOVE_MAX
+                            new_match_start_stable = 0
+                            new_match_start_key = None
+                            new_match_scan_ms = 0.0
+                            next_new_match_scan = (
+                                time.perf_counter()
+                                + 0.10
                             )
+
+                            screen_interrupted = False
+                            screen_interrupt_bad_samples = 0
+                            screen_interrupt_clear_samples = 0
+                            screen_interrupt_fraction = 0.0
 
                             print(
                                 "[INFO] Bottom side:",
@@ -1873,7 +1833,8 @@ def main():
                             )
 
                             print(
-                                "[INFO] Game READY."
+                                "[MATCH] Board setup complete | "
+                                "WAITING FOR NEW GAME"
                             )
 
                     else:
@@ -2281,6 +2242,8 @@ def main():
                                         if not button_still_present:
                                             awaiting_new_match = True
                                             game_ready = False
+                                            require_new_match_start_change = False
+                                            new_match_reference_frame = None
                                             cached_board_grid = None
                                             baseline_frame = None
                                             screen_interrupted = False
@@ -2393,20 +2356,38 @@ def main():
                             fresh_start_key = None
 
                             # Exact untouched starting position.
-                            fresh_initial_ok, _ = (
-                                full_board_state_confirmed(
-                                    frame,
-                                    fresh_board,
-                                    cached_board_coords,
-                                    fresh_black_perspective
-                                )
-                            )
+                            # When the user has only done R+L, do not treat the
+                            # idle initial board as a live game. Require a real
+                            # screen transition (clock/match UI/first move/etc.)
+                            # before accepting the initial FEN.
+                            start_change_ready = True
 
-                            if fresh_initial_ok:
-                                fresh_start_verified = True
-                                fresh_start_key = (
-                                    f"{int(fresh_black_perspective)}:START"
+                            if (
+                                require_new_match_start_change
+                                and new_match_reference_frame is not None
+                            ):
+                                start_change_ready = (
+                                    board_frame_change_score(
+                                        new_match_reference_frame,
+                                        frame
+                                    ) >= 0.003
                                 )
+
+                            if start_change_ready:
+                                fresh_initial_ok, _ = (
+                                    full_board_state_confirmed(
+                                        frame,
+                                        fresh_board,
+                                        cached_board_coords,
+                                        fresh_black_perspective
+                                    )
+                                )
+
+                                if fresh_initial_ok:
+                                    fresh_start_verified = True
+                                    fresh_start_key = (
+                                        f"{int(fresh_black_perspective)}:START"
+                                    )
 
                             # Human-White may already have made the first move
                             # before this polling frame arrived. Reuse the existing
@@ -2465,6 +2446,8 @@ def main():
 
                                     awaiting_new_match = False
                                     game_ready = True
+                                    require_new_match_start_change = False
+                                    new_match_reference_frame = None
                                     game_pgn_saved = False
                                     begin_game_session()
 
