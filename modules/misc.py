@@ -804,12 +804,12 @@ def main():
         now = _pgn_datetime.datetime.now(
             _PgnZoneInfo("Asia/Kolkata")
         )
-        date_text = now.strftime("%Y.%m.%d")
-        time_text = now.strftime("%H:%M:%S")
-        timestamp_text = now.strftime(
+        date_text = start_datetime.strftime("%Y.%m.%d")
+        time_text = start_datetime.strftime("%H:%M:%S")
+        timestamp_text = start_datetime.strftime(
             "%Y-%m-%d %H:%M:%S %z"
         )
-        stamp = now.strftime("%Y-%m-%d_%H-%M-%S")
+        stamp = start_datetime.strftime("%Y-%m-%d_%H-%M-%S")
 
         folder = _pgn_os.path.join(
             _pgn_os.getcwd(),
