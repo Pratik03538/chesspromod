@@ -465,18 +465,20 @@ def periodic_full_board_catchup_scan(
                     + raw_mismatch(observed_b, expected_after),
             })
 
-    # Stockfish turn with a frozen move: first test whether the physical
-    # board is actually still unchanged. A tiny vision fluctuation (without
-    # any touch/move) must not block the pending Stockfish click forever.
+    # Stockfish turn with a frozen move: always evaluate the unchanged
+    # internal position independently of the top-N move candidates. There can
+    # be many legal BOT_PLUS_HUMAN hypotheses, so the unchanged state must not
+    # be crowded out of the recovery shortlist.
+    unchanged_candidate = None
     if pending_bot_move is not None:
-        candidates.append({
+        unchanged_candidate = {
             "kind": "INTERNAL_UNCHANGED",
             "bot_move": None,
             "human_move": None,
             "expected_board": board,
             "raw_pair": raw_mismatch(observed_a, board)
                 + raw_mismatch(observed_b, board),
-        })
+        }
 
     # Stockfish turn with a frozen move: test bot-only and bot+human.
     if pending_bot_move is not None:
@@ -519,6 +521,60 @@ def periodic_full_board_catchup_scan(
 
     if not candidates:
         return None
+
+    # The internal unchanged position is a special safety case. Verify it
+    # directly before ranking move hypotheses so minor vision noise cannot
+    # hide a genuine "no touch, no move" state among many legal replies.
+    if unchanged_candidate is not None:
+        unchanged_ok_a, _, unchanged_details_a = (
+            robust_mismatch(
+                frame_a,
+                observed_a,
+                board
+            )
+        )
+        unchanged_ok_b, _, unchanged_details_b = (
+            robust_mismatch(
+                frame_b,
+                observed_b,
+                board
+            )
+        )
+
+        if (
+            unchanged_ok_a <= TURN_RESCAN_MAX_MISMATCH
+            and unchanged_ok_b <= TURN_RESCAN_MAX_MISMATCH
+        ):
+            unchanged_full_ok, unchanged_full_reason = (
+                full_board_state_confirmed(
+                    frame_b,
+                    board,
+                    board_coords,
+                    black_perspective
+                )
+            )
+
+            if unchanged_full_ok:
+                progress(
+                    "RECOVERY",
+                    (
+                        "2-frame FULL RESCAN VERIFIED | kind=INTERNAL_UNCHANGED "
+                        "| physical board still matches internal position "
+                        f"| scan={scan_a_ms:.1f}/{scan_b_ms:.1f}ms"
+                    ),
+                    key="turn_rescan_unchanged",
+                    force=True
+                )
+                return {
+                    "kind": "INTERNAL_UNCHANGED",
+                    "bot_move": None,
+                    "human_move": None,
+                    "frame": frame_b,
+                    "reason": (
+                        "2-frame full-board rescan confirmed the physical "
+                        "board is unchanged; refreshing baseline before click"
+                    ),
+                }
 
     candidates.sort(
         key=lambda item: item["raw_pair"]
