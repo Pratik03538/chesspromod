@@ -731,7 +731,14 @@ def click_move(
         0
     )
 
-    # Keep the cursor at the finished board position and let scrcpy settle.
+    # Move the cursor away from the chessboard before any visual
+    # verification starts. Scrcpy/board hover highlights can otherwise
+    # appear as false square changes and block the next validation pass.
+    user32.SetCursorPos(
+        0,
+        0
+    )
+
     time.sleep(
         0.018
     )
@@ -756,7 +763,11 @@ def click_move(
             black_perspective
         )
 
-        # Leave the cursor at the promotion choice.
+        # Keep validation cursor-neutral after the promotion menu click.
+        user32.SetCursorPos(
+            0,
+            0
+        )
         return promotion_ok
 
     return True
