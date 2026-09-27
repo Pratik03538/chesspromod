@@ -2907,8 +2907,8 @@ def main():
 
                                         if book_entries:
                                             chosen_book_entry = (
-                                                book_reader.choice(
-                                                    board
+                                                random.choice(
+                                                    book_entries
                                                 )
                                             )
 
