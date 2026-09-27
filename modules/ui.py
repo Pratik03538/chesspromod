@@ -79,10 +79,8 @@ def draw_overlay(
         ui_state = {
             "new_game": True,
             "rematch": False,
-            "book_rank_correction": False,
             "new_rect": None,
             "rematch_rect": None,
-            "book_rank_rect": None,
             "mouse_ready": False,
         }
 
@@ -146,24 +144,6 @@ def draw_overlay(
 
                 if state["rematch"]:
                     state["new_game"] = False
-
-                return
-
-            book_rank_rect = state.get(
-                "book_rank_rect"
-            )
-
-            if (
-                book_rank_rect is not None
-                and book_rank_rect[0] <= mx <= book_rank_rect[2]
-                and book_rank_rect[1] <= my <= book_rank_rect[3]
-            ):
-                state["book_rank_correction"] = not bool(
-                    state.get(
-                        "book_rank_correction",
-                        False
-                    )
-                )
 
         try:
             cv2.namedWindow(
@@ -896,7 +876,7 @@ def draw_overlay(
     )
 
     ctl_top = panel_y + 286
-    ctl_bottom = panel_y + 382
+    ctl_bottom = panel_y + 340
     card(
         ctl_top,
         ctl_bottom,
@@ -928,16 +908,8 @@ def draw_overlay(
         ctl_top + 10 + button_h
     )
 
-    book_rank_rect = (
-        panel_x + 18,
-        ctl_top + 52,
-        panel_x + panel_w - 18,
-        ctl_top + 52 + button_h
-    )
-
     ui_state["new_rect"] = new_rect
     ui_state["rematch_rect"] = rematch_rect
-    ui_state["book_rank_rect"] = book_rank_rect
 
     rounded_button(
         new_rect,
@@ -961,26 +933,7 @@ def draw_overlay(
         (235, 170, 75)
     )
 
-    rounded_button(
-        book_rank_rect,
-        (
-            "BOOK RANK ON"
-            if ui_state.get(
-                "book_rank_correction",
-                False
-            )
-            else "BOOK RANK OFF"
-        ),
-        bool(
-            ui_state.get(
-                "book_rank_correction",
-                False
-            )
-        ),
-        (105, 165, 235)
-    )
-
-    moves_top = panel_y + 395
+    moves_top = panel_y + 353
     moves_bottom = panel_y + panel_h - 12
 
     card(
