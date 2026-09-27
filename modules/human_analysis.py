@@ -174,15 +174,20 @@ def _rank_entropy(ranks):
 def _touch_offset_stats(touch):
     if not touch:
         return 0.0, 0.0, 0.0
-    radial = []
-    source_target_lengths = []
-    for item in touch:
-        sx, sy = item['source']
-        tx, ty = item['target']
-        radial.append(math.hypot(sx % 100 - 50, sy % 100 - 50))
-        source_target_lengths.append(math.hypot(tx - sx, ty - sy))
-    return _mean(radial), _stdev(radial), _mean(source_target_lengths)
-
+    source_x = [item["source"][0] for item in touch]
+    source_y = [item["source"][1] for item in touch]
+    target_x = [item["target"][0] for item in touch]
+    target_y = [item["target"][1] for item in touch]
+    source_spread = _mean([_stdev(source_x), _stdev(source_y)])
+    target_spread = _mean([_stdev(target_x), _stdev(target_y)])
+    distances = [
+        math.hypot(
+            item["target"][0] - item["source"][0],
+            item["target"][1] - item["source"][1]
+        )
+        for item in touch
+    ]
+    return source_spread, target_spread, _mean(distances)
 def print_report(game_board=None):
     _ensure_session()
 
@@ -378,7 +383,7 @@ def print_report(game_board=None):
 
     drag_cv = _coefficient_of_variation(drag_times)
     path_cv = _coefficient_of_variation(path_ratios)
-    offset_mean, offset_sd, avg_drag_distance = _touch_offset_stats(touch)
+    source_spread, target_spread, avg_drag_distance = _touch_offset_stats(touch)
 
     # A separate consistency indicator prevents a single aggregate score from
     # hiding a very repetitive or very erratic timing pattern.
@@ -426,8 +431,8 @@ def print_report(game_board=None):
     )
     if touch:
         _print(
-            f"Touch variation      : offset-sd={offset_sd:.1f}px "
-            f"avg-drag={avg_drag_distance:.1f}px "
+            f"Touch spread         : source={source_spread:.1f}px "
+            f"target={target_spread:.1f}px avg-drag={avg_drag_distance:.1f}px "
             f"drag-CV={drag_cv:.2f} path-CV={path_cv:.2f}"
         )
     _print(
