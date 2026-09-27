@@ -410,6 +410,56 @@ def choose_stockfish_move(
                 None
             )
 
+        # When #1 was used immediately before, give a near-equal #2 a strong
+        # chance instead of allowing the selector to repeat #1 automatically.
+        # The #2 move must already survive the active safety/floor filter.
+        near_equal_second = []
+        if previous_rank == 0:
+            top_first = next(
+                (
+                    candidate
+                    for candidate in selection_pool
+                    if int(
+                        candidate.get(
+                            "rank",
+                            0
+                        )
+                    ) == 0
+                ),
+                None
+            )
+
+            if top_first is not None:
+                near_equal_second = [
+                    candidate
+                    for candidate in selection_pool
+                    if (
+                        int(
+                            candidate.get(
+                                "rank",
+                                0
+                            )
+                        ) == 1
+                        and int(
+                            candidate.get(
+                                "cp",
+                                0
+                            )
+                        ) >= int(
+                            top_first.get(
+                                "cp",
+                                0
+                            )
+                        ) - 60
+                    )
+                ]
+
+        if (
+            near_equal_second
+            and random.random() < 0.75
+        ):
+            selection_pool = near_equal_second
+
         lower_candidates = [
             candidate
             for candidate in candidate_list
@@ -1149,9 +1199,6 @@ def choose_stockfish_move(
     if current_advantage > peak_favor_cp:
         peak_favor_cp = current_advantage
 
-    if best_cp > peak_favor_cp:
-        peak_favor_cp = best_cp
-
     peak_favor_cp = max(
         0,
         peak_favor_cp
@@ -1268,7 +1315,7 @@ def choose_stockfish_move(
             diversity_pool = [
                 candidate
                 for candidate in conversion_pool
-                if candidate["rank"] >= 2
+                if candidate["rank"] >= 1
             ]
 
             # Avoid obvious top-rank streaks while preserving the hard
