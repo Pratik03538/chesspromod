@@ -486,6 +486,131 @@ def detect_existing_white_first_move(
     return best_move if full_ok else None
 
 
+def detect_game_start_activity(
+    baseline_frame,
+    previous_frame,
+    current_frame,
+    board_coords
+):
+    """Detect a likely transition from the pre-game UI to active play.
+
+    Only pixels outside the chessboard are inspected. This function is called
+    only while waiting for the game to start, so it does not add latency to
+    normal move detection or Stockfish turns.
+    """
+    if (
+        baseline_frame is None
+        or previous_frame is None
+        or current_frame is None
+        or board_coords is None
+    ):
+        return False, 0.0, 0.0
+
+    height, width = current_frame.shape[:2]
+
+    if height <= 0 or width <= 0:
+        return False, 0.0, 0.0
+
+    try:
+        base_gray = cv2.cvtColor(
+            baseline_frame,
+            cv2.COLOR_BGR2GRAY
+        )
+        previous_gray = cv2.cvtColor(
+            previous_frame,
+            cv2.COLOR_BGR2GRAY
+        )
+        current_gray = cv2.cvtColor(
+            current_frame,
+            cv2.COLOR_BGR2GRAY
+        )
+
+        base_small = cv2.resize(
+            base_gray,
+            (96, 96),
+            interpolation=cv2.INTER_AREA
+        )
+        previous_small = cv2.resize(
+            previous_gray,
+            (96, 96),
+            interpolation=cv2.INTER_AREA
+        )
+        current_small = cv2.resize(
+            current_gray,
+            (96, 96),
+            interpolation=cv2.INTER_AREA
+        )
+    except Exception:
+        return False, 0.0, 0.0
+
+    x, y, w, h = (
+        int(board_coords[0]),
+        int(board_coords[1]),
+        int(board_coords[2]),
+        int(board_coords[3])
+    )
+
+    sx1 = max(0, min(96, int((x / float(width)) * 96)))
+    sy1 = max(0, min(96, int((y / float(height)) * 96)))
+    sx2 = max(0, min(96, int(((x + w) / float(width)) * 96)))
+    sy2 = max(0, min(96, int(((y + h) / float(height)) * 96)))
+
+    mask = np.ones(
+        (96, 96),
+        dtype=bool
+    )
+
+    if sx2 > sx1 and sy2 > sy1:
+        mask[sy1:sy2, sx1:sx2] = False
+
+    baseline_diff = cv2.absdiff(
+        base_small,
+        current_small
+    )
+    motion_diff = cv2.absdiff(
+        previous_small,
+        current_small
+    )
+
+    base_values = baseline_diff[mask]
+    motion_values = motion_diff[mask]
+
+    if base_values.size == 0 or motion_values.size == 0:
+        return False, 0.0, 0.0
+
+    base_mean = float(
+        np.mean(base_values) / 255.0
+    )
+    base_ratio = float(
+        np.mean(base_values >= 8)
+    )
+
+    motion_mean = float(
+        np.mean(motion_values) / 255.0
+    )
+    motion_ratio = float(
+        np.mean(motion_values >= 8)
+    )
+
+    active = (
+        (
+            base_mean >= GAME_START_ACTIVITY_THRESHOLD
+            and base_ratio >= GAME_START_CHANGED_RATIO
+        )
+        or
+        (
+            motion_mean >= GAME_START_ACTIVITY_THRESHOLD
+            and motion_ratio >= GAME_START_CHANGED_RATIO
+        )
+    )
+
+    return (
+        active,
+        base_mean,
+        base_ratio
+    )
+
+
 def main():
     global _advantage_progress_target_cp
     global _advantage_progress_hold_moves
@@ -595,6 +720,10 @@ def main():
     pending_bot_moves = {}
     pending_recovered_human = None
     next_main_turn_rescan = time.perf_counter() + TURN_RESCAN_INTERVAL
+    game_started = False
+    game_start_last_check = 0.0
+    game_start_hits = 0
+    game_start_previous_frame = None
     visual_black_perspective = False
     stockfish_color = None
     human_color = None
@@ -679,6 +808,10 @@ def main():
                     game_ready = False
                     baseline_frame = None
                     analysis_state = None
+                    game_started = False
+                    game_start_last_check = 0.0
+                    game_start_hits = 0
+                    game_start_previous_frame = None
 
                     opponent_match_history.clear()
 
@@ -792,6 +925,10 @@ def main():
 
                             cached_board_grid = locked_grid
                             baseline_frame = locked_frame
+                            game_started = False
+                            game_start_last_check = time.perf_counter()
+                            game_start_hits = 0
+                            game_start_previous_frame = locked_frame
 
                             if human_color == chess.WHITE:
                                 first_move = detect_existing_white_first_move(
@@ -825,6 +962,7 @@ def main():
                                     if first_ok:
                                         san = board.san(first_move)
                                         board.push(first_move)
+                                        game_started = True
                                         baseline_frame = (
                                             first_verified_frame
                                             if first_verified_frame is not None
@@ -956,6 +1094,11 @@ def main():
 
                         cached_board_grid = fresh_grid
                         baseline_frame = fresh_frame
+                        game_start_last_check = time.perf_counter()
+                        game_start_hits = 0
+                        game_start_previous_frame = fresh_frame
+                        if board.move_stack:
+                            game_started = True
 
                         if human_color == chess.WHITE:
                             first_move = detect_existing_white_first_move(
@@ -989,6 +1132,7 @@ def main():
                                 if first_ok:
                                     san = board.san(first_move)
                                     board.push(first_move)
+                                    game_started = True
                                     baseline_frame = (
                                         first_verified_frame
                                         if first_verified_frame is not None
@@ -1054,6 +1198,7 @@ def main():
                         )
 
 
+
                 if (
                     game_ready
                     and grid_locked
@@ -1109,7 +1254,7 @@ def main():
                                 force=True
                             )
 
-                                status = "READY - PRESS R"
+                status = "READY - PRESS R"
 
                 if (
                     grid_locked
@@ -1121,6 +1266,11 @@ def main():
                     ):
                         status = (
                             "DETECT BOTTOM SIDE"
+                        )
+
+                    elif not game_started:
+                        status = (
+                            "WAITING GAME START"
                         )
 
                     elif bot_thinking:
@@ -1148,6 +1298,7 @@ def main():
                 if (
                     game_ready
                     and grid_locked
+                    and game_started
                     and stockfish_color is not None
                 ):
                     if (
