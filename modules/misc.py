@@ -2906,10 +2906,26 @@ def main():
                                             )
 
                                         if book_entries:
-                                            chosen_book_entry = (
-                                                random.choice(
-                                                    book_entries
+                                            book_weights = [
+                                                max(
+                                                    1,
+                                                    int(
+                                                        getattr(
+                                                            entry,
+                                                            "weight",
+                                                            1
+                                                        )
+                                                    )
                                                 )
+                                                for entry in book_entries
+                                            ]
+
+                                            chosen_book_entry = (
+                                                random.choices(
+                                                    book_entries,
+                                                    weights=book_weights,
+                                                    k=1
+                                                )[0]
                                             )
 
                                             best_move = (
