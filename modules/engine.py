@@ -734,6 +734,7 @@ def choose_stockfish_move(
         ):
             choose_stockfish_move._last_human_rank = None
             choose_stockfish_move._recent_human_ranks = []
+            choose_stockfish_move._winning_conversion_cycle = 0
             choose_stockfish_move._first_position_marker = first_position_marker
 
     mover = board.turn
@@ -824,6 +825,7 @@ def choose_stockfish_move(
             _mate_progress_target_mate = None
             _mate_progress_hold_moves = 0
             _mate_progress_hold_limit = MATE_SUSTAIN_MIN_MOVES
+            choose_stockfish_move._winning_conversion_cycle = 0
 
             selected = best
 
@@ -1054,10 +1056,16 @@ def choose_stockfish_move(
     current_advantage = best_cp
 
     if engine is not None:
+        # Keep the extra human-like position check, but use the same
+        # fast analysis budget as the normal evaluator so move latency does
+        # not grow just because human-like selection is enabled.
         current_eval_info = engine.analyse(
             board,
             chess.engine.Limit(
-                time=HUMAN_LIKE_EVAL_TIME
+                time=min(
+                    HUMAN_LIKE_EVAL_TIME,
+                    ANALYSIS_TIME
+                )
             )
         )
         current_eval_score = current_eval_info.get(
@@ -1257,6 +1265,61 @@ def choose_stockfish_move(
             }
         )
 
+    # 3. WINNING CONVERSION.
+    # A human player with a clear advantage does not endlessly shuffle the
+    # position. After several human-like choices, force a near-best conversion
+    # move while still avoiding a permanent #1 habit. This is what turns a
+    # growing advantage into an actual win.
+    if (
+        current_advantage >= 300
+        and getattr(
+            choose_stockfish_move,
+            "_winning_conversion_cycle",
+            0
+        ) >= 3
+    ):
+        conversion_candidates = [
+            candidate
+            for candidate in candidates
+            if (
+                candidate["rank"] <= 5
+                and candidate["cp"]
+                >= max(
+                    150,
+                    best_cp - 100
+                )
+                and candidate["cp"]
+                >= max(
+                    200,
+                    current_advantage - 120
+                )
+            )
+        ]
+
+        if conversion_candidates:
+            chosen = choose_human_candidate(
+                board,
+                conversion_candidates
+            )
+
+            choose_stockfish_move._winning_conversion_cycle = 0
+
+            return (
+                chosen["move"],
+                chosen["info"],
+                {
+                    "rank": chosen["rank"],
+                    "current_cp": current_advantage,
+                    "selected_cp": chosen["cp"],
+                    "reason": (
+                        f"WINNING CONVERSION "
+                        f"(Engine #{chosen['rank'] + 1}) | "
+                        f"BEST={best_cp / 100:+.2f} "
+                        f"SELECTED={chosen['cp'] / 100:+.2f}"
+                    )
+                }
+            )
+
     # 3. KILLER INSTINCT: exact 1/15 chance.
     if (
         engine is not None
@@ -1327,6 +1390,7 @@ def choose_stockfish_move(
                 choose_stockfish_move._recent_human_ranks = (
                     recent_ranks + [0]
                 )[-3:]
+                choose_stockfish_move._winning_conversion_cycle = 0
 
                 return (
                     deep_move,
@@ -1348,10 +1412,10 @@ def choose_stockfish_move(
     # already has a meaningful cushion. The move stays legal and the remaining
     # evaluation is kept positive so the bot can still play to a win.
     if (
-        current_advantage >= 300
+        current_advantage >= 400
         and random.randint(
             1,
-            10
+            12
         ) == 1
     ):
         mistake_candidates = [
@@ -1361,11 +1425,11 @@ def choose_stockfish_move(
             ]
             if (
                 candidate["cp"]
-                <= best_cp - 100
+                <= best_cp - 60
                 and candidate["cp"]
                 >= max(
-                    50,
-                    current_advantage - 350
+                    150,
+                    current_advantage - 220
                 )
             )
         ]
@@ -1393,10 +1457,10 @@ def choose_stockfish_move(
             )
 
     if (
-        current_advantage >= 500
+        current_advantage >= 700
         and random.randint(
             1,
-            20
+            30
         ) == 1
     ):
         blunder_candidates = [
@@ -1406,11 +1470,11 @@ def choose_stockfish_move(
             ]
             if (
                 candidate["cp"]
-                <= best_cp - 250
+                <= best_cp - 150
                 and candidate["cp"]
                 >= max(
-                    100,
-                    current_advantage - 550
+                    200,
+                    current_advantage - 350
                 )
             )
         ]
