@@ -692,8 +692,6 @@ def main():
         from zoneinfo import ZoneInfo as _PgnZoneInfo
 
         current_game_number = next_game_number
-        next_game_number += 1
-
         current_game_started_at = time.perf_counter()
         current_game_started_datetime = _PgnDateTime.now(
             _PgnZoneInfo("Asia/Kolkata")
@@ -753,6 +751,7 @@ def main():
 
     def save_game_pgn(game_board, result=None, termination=None):
         nonlocal game_pgn_saved
+        nonlocal next_game_number
 
         if game_pgn_saved or not game_board.move_stack:
             return None
@@ -885,6 +884,7 @@ def main():
             )
 
         game_pgn_saved = True
+        next_game_number += 1
         print(
             "[PGN] Saved: "
             f"{path} | Result={result} | Termination={termination}"
