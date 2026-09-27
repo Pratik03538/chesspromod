@@ -1019,28 +1019,111 @@ def main():
                 np.mean(gray < 100)
             )
 
-            if (
-                white_fraction < 0.015
-                or dark_fraction < 0.45
-            ):
-                return None
+            # Completed result screen has TWO dark buttons in the
+            # upper-middle area: Rematch on the left and New
+            # <time-control> on the right. Detect that pair directly,
+            # without using green color, because Game Review is green.
+            top_y1 = int(height * 0.345)
+            top_y2 = int(height * 0.425)
 
-            # Normal completed-result screen: the right-side New
-            # <time-control> button is the action target. It is not
-            # necessarily green, so do not use lower green controls such
-            # as Game Review to identify it.
-            return (
-                int(width * 0.735),
-                int(height * 0.392)
-            )
+            top_roi = frame[
+                top_y1:top_y2,
+                :
+            ]
 
-            # Game-aborted screen: only a lower green New <time-control>
-            # button is present; there is no Rematch button.
-            full_hsv = cv2.cvt(
-                frame,
+            top_hsv = cv2.cvtColor(
+                top_roi,
                 cv2.COLOR_BGR2HSV
             )
 
+            dark_neutral = (
+                (top_hsv[:, :, 1] < 25)
+                & (top_hsv[:, :, 2] >= 40)
+                & (top_hsv[:, :, 2] <= 85)
+            ).astype(
+                np.uint8
+            )
+
+            dark_neutral = cv2.morphologyEx(
+                dark_neutral,
+                cv2.MORPH_CLOSE,
+                np.ones(
+                    (9, 15),
+                    np.uint8
+                )
+            )
+
+            contours, _ = cv2.findContours(
+                dark_neutral,
+                cv2.RETR_EXTERNAL,
+                cv2.CHAIN_APPROX_SIMPLE
+            )
+
+            left_button = None
+            right_button = None
+
+            for contour in contours:
+                bx, by, bw, bh = cv2.boundingRect(
+                    contour
+                )
+
+                by += top_y1
+
+                if not (
+                    bw >= width * 0.30
+                    and bh >= height * 0.02
+                    and bw / float(max(1, bh)) >= 3.0
+                    and by >= int(height * 0.345)
+                    and by + bh <= int(height * 0.425)
+                ):
+                    continue
+
+                center_x = bx + bw / 2.0
+
+                if center_x < width * 0.46:
+                    if (
+                        left_button is None
+                        or bw * bh > left_button[2] * left_button[3]
+                    ):
+                        left_button = (
+                            bx,
+                            by,
+                            bw,
+                            bh
+                        )
+
+                elif center_x > width * 0.46:
+                    if (
+                        right_button is None
+                        or bw * bh > right_button[2] * right_button[3]
+                    ):
+                        right_button = (
+                            bx,
+                            by,
+                            bw,
+                            bh
+                        )
+
+            if (
+                left_button is not None
+                and right_button is not None
+            ):
+                detect_new_game_button._abort_layout = False
+
+                bx, by, bw, bh = right_button
+
+                return (
+                    int(bx + bw / 2),
+                    int(by + bh / 2)
+                )
+
+            # No upper Rematch/New pair: use the lower green New button
+            # only for the abort-screen layout. This prevents the green
+            # Game Review control from being selected on result screens.
+            full_hsv = cv2.cvtColor(
+                frame,
+                cv2.COLOR_BGR2HSV
+            )
             lower_y1 = int(height * 0.48)
             lower_roi = full_hsv[
                 lower_y1:,
