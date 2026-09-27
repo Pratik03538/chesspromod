@@ -3672,6 +3672,22 @@ def main():
 
                                     if (
                                         pending_recovery is not None
+                                        and pending_recovery.get("frame") is not None
+                                        and pending_recovery.get("kind") == "INTERNAL_UNCHANGED"
+                                    ):
+                                        # The full rescan proved that no touch/move
+                                        # happened and the physical board still matches
+                                        # the committed internal position. Refresh the
+                                        # baseline before the normal pre-click gate.
+                                        baseline_frame = pending_recovery["frame"]
+                                        print(
+                                            "[RECOVERY] FULL RESCAN | board unchanged | "
+                                            "refreshed baseline before retry "
+                                            f"{best_san}"
+                                        )
+
+                                    elif (
+                                        pending_recovery is not None
                                         and pending_recovery.get("bot_move") == best_move
                                         and pending_recovery.get("frame") is not None
                                         and pending_recovery.get("kind") in (
