@@ -1313,6 +1313,21 @@ def choose_stockfish_move(
                 deep_move = None
 
             if deep_move is not None:
+                # Record Deep Calc as a top-rank decision for the
+                # anti-repeat history, so the next human-like choice does
+                # not immediately return to #1/#2 again.
+                choose_stockfish_move._last_human_rank = 0
+                recent_ranks = list(
+                    getattr(
+                        choose_stockfish_move,
+                        "_recent_human_ranks",
+                        []
+                    )
+                )
+                choose_stockfish_move._recent_human_ranks = (
+                    recent_ranks + [0]
+                )[-3:]
+
                 return (
                     deep_move,
                     deep_result,
