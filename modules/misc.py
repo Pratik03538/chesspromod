@@ -988,7 +988,6 @@ def main():
 
     def detect_new_game_button(frame):
         """Detect the completed-game Rematch and New controls only."""
-        detect_new_game_button._abort_layout = False
         detect_new_game_button._rematch_button_center = None
         detect_new_game_button._new_game_button_center = None
 
@@ -1104,7 +1103,6 @@ def main():
         except Exception:
             detect_new_game_button._rematch_button_center = None
             detect_new_game_button._new_game_button_center = None
-            detect_new_game_button._abort_layout = False
             return None
 
     def wait_for_initial_match(
