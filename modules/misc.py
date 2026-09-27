@@ -2284,6 +2284,36 @@ def main():
                                             and not detect_new_game_button._abort_layout
                                         )
 
+                                        # Small random wait before every result-page
+                                        # action. This is intentionally a floating-point
+                                        # delay: 1.000-4.000 seconds, including values
+                                        # such as 1.537s or 2.233s.
+                                        result_click_delay = random.uniform(
+                                            1.0,
+                                            4.0
+                                        )
+
+                                        print(
+                                            "[MATCH] Waiting "
+                                            f"{result_click_delay:.3f}s before "
+                                            f"{'Rematch' if use_rematch else 'New'} click"
+                                        )
+
+                                        time.sleep(
+                                            result_click_delay
+                                        )
+
+                                        # Re-capture immediately before the click so
+                                        # confirmation compares the actual result page
+                                        # immediately before vs immediately after.
+                                        before_result_click_frame = capture_screen(
+                                            sct,
+                                            scrcpy_hwnd
+                                        )
+
+                                        if before_result_click_frame is None:
+                                            before_result_click_frame = frame.copy()
+
                                         print(
                                             "[MATCH] Clicking "
                                             f"{'Rematch' if use_rematch else 'New'} "
@@ -2299,14 +2329,15 @@ def main():
                                             + action_button[1]
                                         )
 
-                                        # Use a dedicated reliable press for the
-                                        # result-page New/Rematch control. The normal
-                                        # board-move click path stays untouched.
+                                        # Reliable physical press/release. The cursor
+                                        # landing alone is NOT considered a click.
                                         user32.SetCursorPos(
                                             int(click_x),
                                             int(click_y)
                                         )
-                                        time.sleep(0.020)
+                                        time.sleep(
+                                            0.020
+                                        )
                                         user32.mouse_event(
                                             MOUSEEVENTF_LEFTDOWN,
                                             0,
@@ -2314,7 +2345,9 @@ def main():
                                             0,
                                             0
                                         )
-                                        time.sleep(0.030)
+                                        time.sleep(
+                                            0.040
+                                        )
                                         user32.mouse_event(
                                             MOUSEEVENTF_LEFTUP,
                                             0,
@@ -2331,19 +2364,16 @@ def main():
                                         print(
                                             "[MATCH] New-button click "
                                             f"attempt "
-                                            f"{new_match_click_attempts}/3"
+                                            f"{new_match_click_attempts}/10"
                                         )
 
-                                        # Do not enter matchmaking until the
-                                        # click is visibly acknowledged. If the
-                                        # same result-page button is still
-                                        # present, the click did not register
-                                        # (or the page did not leave the result
-                                        # state yet), so a controlled retry is
-                                        # allowed.
+                                        # Confirm the CLICK itself, not merely cursor
+                                        # position. For a completed result screen only
+                                        # the upper Rematch/New controls are relevant.
+                                        # Game Review is lower on the page and is ignored.
                                         click_ack_deadline = (
                                             time.perf_counter()
-                                            + 0.60
+                                            + 1.50
                                         )
                                         button_still_present = True
 
@@ -2362,50 +2392,40 @@ def main():
                                                 )
                                                 continue
 
-                                            if clicked_normal_result_new:
-                                                # For a completed result screen, never
-                                                # run the generic green-button detector
-                                                # during acknowledgement. It can see
-                                                # Game Review and incorrectly conclude
-                                                # that the click succeeded.
-                                                #
-                                                # Instead, compare the result-action
-                                                # region before/after the click. If the
-                                                # result page remains visually unchanged,
-                                                # the New click did not register and the
-                                                # normal retry mechanism must fire.
-                                                try:
-                                                    ry1 = int(
-                                                        frame.shape[0] * 0.33
-                                                    )
-                                                    ry2 = int(
-                                                        frame.shape[0] * 0.46
-                                                    )
-                                                    rx1 = int(
-                                                        frame.shape[1] * 0.03
-                                                    )
-                                                    rx2 = int(
-                                                        frame.shape[1] * 0.97
-                                                    )
+                                            try:
+                                                height_ack, width_ack = (
+                                                    ack_frame.shape[:2]
+                                                )
 
-                                                    before_region = frame[
+                                                ry1 = int(
+                                                    height_ack * 0.33
+                                                )
+                                                ry2 = int(
+                                                    height_ack * 0.46
+                                                )
+                                                rx1 = int(
+                                                    width_ack * 0.03
+                                                )
+                                                rx2 = int(
+                                                    width_ack * 0.97
+                                                )
+
+                                                before_region = (
+                                                    before_result_click_frame[
                                                         ry1:ry2,
                                                         rx1:rx2
                                                     ]
-                                                    after_region = ack_frame[
-                                                        ry1:ry2,
-                                                        rx1:rx2
-                                                    ]
+                                                )
+                                                after_region = ack_frame[
+                                                    ry1:ry2,
+                                                    rx1:rx2
+                                                ]
 
-                                                    if (
-                                                        before_region.size
-                                                        == 0
-                                                        or after_region.shape
-                                                        != before_region.shape
-                                                    ):
-                                                        button_still_present = False
-                                                        break
-
+                                                if (
+                                                    before_region.size > 0
+                                                    and before_region.shape
+                                                    == after_region.shape
+                                                ):
                                                     delta = cv2.absdiff(
                                                         before_region,
                                                         after_region
@@ -2421,27 +2441,17 @@ def main():
 
                                                     if changed_fraction >= 0.025:
                                                         button_still_present = False
+                                                        print(
+                                                            "[MATCH] New-button CLICK CONFIRMED | "
+                                                            "result action area changed "
+                                                            f"{changed_fraction * 100.0:.1f}%"
+                                                        )
                                                         break
-                                                except Exception:
-                                                    # If this visual acknowledgement
-                                                    # cannot be computed, keep waiting
-                                                    # so a later loop can retry safely.
-                                                    pass
-
-                                                time.sleep(
-                                                    0.03
+                                            except Exception as verify_error:
+                                                print(
+                                                    "[MATCH] Click verification retry: "
+                                                    f"{verify_error}"
                                                 )
-                                                continue
-
-                                            ack_button = (
-                                                detect_new_game_button(
-                                                    ack_frame
-                                                )
-                                            )
-
-                                            if ack_button is None:
-                                                button_still_present = False
-                                                break
 
                                             time.sleep(
                                                 0.03
@@ -2475,18 +2485,18 @@ def main():
 
                                             print(
                                                 "[MATCH] New-button click "
-                                                "confirmed | entering matchmaking"
+                                                "CONFIRMED | entering matchmaking"
                                             )
                                         else:
                                             print(
-                                                "[MATCH] New-button click "
-                                                "not confirmed; result screen "
-                                                "still present"
+                                                "[MATCH] New-button CLICK FAILED | "
+                                                "result action area unchanged | "
+                                                "will retry same New button"
                                             )
 
                                             if (
                                                 new_match_click_attempts
-                                                >= 3
+                                                >= 10
                                             ):
                                                 new_match_click_attempts = 0
                                                 new_match_button_stable = 0
@@ -2494,7 +2504,7 @@ def main():
 
                                                 print(
                                                     "[MATCH] New-button click "
-                                                    "failed 3/3 times | "
+                                                    "failed 10/10 times | "
                                                     "will re-detect result screen"
                                                 )
 
