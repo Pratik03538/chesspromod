@@ -137,6 +137,27 @@ def draw_overlay(
         "WAITING"
     )
 
+    game_number = getattr(
+        draw_overlay,
+        "_game_number",
+        None
+    )
+
+    game_started_at = getattr(
+        draw_overlay,
+        "_game_started_at",
+        None
+    )
+
+    game_elapsed = (
+        max(
+            0.0,
+            time.perf_counter() - game_started_at
+        )
+        if game_started_at is not None
+        else 0.0
+    )
+
     bot_state = getattr(
         draw_overlay,
         "_bot_state",
@@ -189,7 +210,7 @@ def draw_overlay(
         + 24
         + 24
         + 42
-        + 54
+        + 74
         + 16
         + button_h
         + 16
@@ -290,16 +311,22 @@ def draw_overlay(
         cv2.LINE_AA
     )
 
+    game_label = (
+        f"GAME #{int(game_number):03d}"
+        if game_number is not None
+        else "GAME"
+    )
+
     cv2.putText(
         display_frame,
-        "MATCH",
+        game_label,
         (
             panel_x + 12,
             panel_y + 43
         ),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.36,
-        (155, 155, 165),
+        0.40,
+        (245, 245, 245),
         1,
         cv2.LINE_AA
     )
@@ -308,12 +335,29 @@ def draw_overlay(
         display_frame,
         match_state,
         (
-            panel_x + 76,
+            panel_x + 130,
             panel_y + 43
         ),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.43,
-        (245, 245, 245),
+        0.40,
+        (210, 210, 220),
+        1,
+        cv2.LINE_AA
+    )
+
+    cv2.putText(
+        display_frame,
+        (
+            f"TIME {int(game_elapsed // 60):02d}:"
+            f"{int(game_elapsed % 60):02d}"
+        ),
+        (
+            panel_x + 12,
+            panel_y + 84
+        ),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.34,
+        (165, 165, 175),
         1,
         cv2.LINE_AA
     )
@@ -342,7 +386,7 @@ def draw_overlay(
         "BOT",
         (
             panel_x + 12,
-            panel_y + 89
+            panel_y + 109
         ),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.36,
@@ -356,7 +400,7 @@ def draw_overlay(
         bot_state,
         (
             panel_x + 58,
-            panel_y + 89
+            panel_y + 109
         ),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.41,
@@ -370,7 +414,7 @@ def draw_overlay(
         f"{state_age:.1f}s",
         (
             panel_x + panel_w - 52,
-            panel_y + 89
+            panel_y + 109
         ),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.34,
@@ -379,7 +423,7 @@ def draw_overlay(
         cv2.LINE_AA
     )
 
-    buttons_y = panel_y + 106
+    buttons_y = panel_y + 126
     new_x1 = panel_x + 12
     new_y1 = buttons_y
     new_x2 = new_x1 + button_w
