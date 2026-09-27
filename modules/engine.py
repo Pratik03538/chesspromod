@@ -1346,12 +1346,42 @@ def choose_stockfish_move(
                     current_eval
                 )
 
-    # Human-like winning play uses the current position's evaluation
-    # band instead of a persistent MAX/floor lock. This keeps room for a
-    # strong move followed by a few small inaccuracies and then a renewed
-    # best-line/progress move, rather than forcing the same position to be held.
-    favorable_floor_active = False
-    peak_favor_cp = 0
+    # Track the highest favorable evaluation reached in this game.
+    # The hard drawdown floor is the smaller of:
+    #   20% of the peak, or 3.00 pawns.
+    peak_advantage_cp = max(
+        int(
+            getattr(
+                choose_stockfish_move,
+                "_peak_advantage_cp",
+                0
+            )
+        ),
+        int(current_advantage)
+    )
+
+    choose_stockfish_move._peak_advantage_cp = peak_advantage_cp
+
+    favorable_floor_active = (
+        peak_advantage_cp >= MIN_POSITIVE_CP
+    )
+
+    if favorable_floor_active:
+        allowed_drawdown_cp = min(
+            float(WINNING_MAX_DRAWDOWN_CP),
+            float(peak_advantage_cp)
+            * float(WINNING_MAX_DRAWDOWN_PERCENT)
+        )
+
+        favorable_eval_floor_cp = (
+            float(peak_advantage_cp)
+            - allowed_drawdown_cp
+        )
+    else:
+        favorable_eval_floor_cp = 0.0
+
+    peak_favor_cp = peak_advantage_cp
+    choose_stockfish_move._peak_favor_cp = peak_favor_cp
     choose_stockfish_move._winning_lock = False
 
     # 1. GM ACTIVE WINNING PLAY.
@@ -1378,15 +1408,9 @@ def choose_stockfish_move(
             )
         )
 
-        # Above +4.00, use a tight stability floor. A candidate may still be
-        # lower MultiPV, but it must keep the current winning advantage within
-        # 0.80 pawn. This is the main protection against deliberate piece
-        # giveaways while preserving human-like rank variation.
-        favorable_floor_active = True
-        favorable_eval_floor_cp = max(
-            300,
-            current_advantage - 80
-        )
+        # Above +4.00, keep the configured peak-evaluation drawdown floor.
+        # The floor is already calculated from the highest favorable
+        # evaluation reached during the game.
 
         # Allow an occasional deeper best-line move, but never #1 immediately
         # after another top-two move when a safe lower-ranked choice exists.

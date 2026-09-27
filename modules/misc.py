@@ -3310,6 +3310,18 @@ def main():
                                         }
                                     )
 
+                                    selected_info = pending_entry.get(
+                                        "selected_info",
+                                        result
+                                    )
+
+                                    timing_delay_done = bool(
+                                        pending_entry.get(
+                                            "timing_delay_done",
+                                            False
+                                        )
+                                    )
+
                                     engine_elapsed = 0.0
 
                                     print(
@@ -3558,7 +3570,9 @@ def main():
                                             "san": best_san,
                                             "result": result,
                                             "best_info_move": best_info_move,
+                                            "selected_info": selected_info,
                                             "selection_meta": selection_meta,
+                                            "timing_delay_done": False,
                                         }
 
                                         print(
@@ -3965,6 +3979,70 @@ def main():
                                         "physical board matches internal board 64/64"
                                     )
 
+                                    if not timing_delay_done:
+                                        if random.random() < REACTION_OCCASIONAL_CHANCE:
+                                            reaction_delay = random.uniform(
+                                                REACTION_OCCASIONAL_MIN,
+                                                REACTION_OCCASIONAL_MAX
+                                            )
+                                        elif (
+                                            board.is_capture(best_move)
+                                            or board.gives_check(best_move)
+                                        ):
+                                            reaction_delay = random.uniform(
+                                                REACTION_NORMAL_MIN,
+                                                REACTION_NORMAL_MAX
+                                            )
+                                        else:
+                                            reaction_delay = random.uniform(
+                                                REACTION_FAST_MIN,
+                                                REACTION_FAST_MAX
+                                            )
+
+                                        if reaction_delay > 0.0:
+                                            time.sleep(reaction_delay)
+
+                                        mate_pause = 0.0
+                                        if selected_info is not None:
+                                            try:
+                                                score = selected_info.get("score")
+                                                mate = (
+                                                    score.pov(board.turn).mate()
+                                                    if score is not None
+                                                    else None
+                                                )
+
+                                                if mate == 5 and random.random() <= MATE_PAUSE_CHANCE_M5:
+                                                    mate_pause = random.uniform(
+                                                        MATE_PAUSE_M5_MIN,
+                                                        MATE_PAUSE_M5_MAX
+                                                    )
+                                                elif mate == 6 and random.random() <= MATE_PAUSE_CHANCE_M6:
+                                                    mate_pause = random.uniform(
+                                                        MATE_PAUSE_M6_MIN,
+                                                        MATE_PAUSE_M6_MAX
+                                                    )
+                                                elif 7 <= mate <= 8 and random.random() <= MATE_PAUSE_CHANCE_M7_8:
+                                                    mate_pause = random.uniform(
+                                                        MATE_PAUSE_M7_8_MIN,
+                                                        MATE_PAUSE_M7_8_MAX
+                                                    )
+                                            except Exception:
+                                                mate_pause = 0.0
+
+                                        if mate_pause > 0.0:
+                                            print(
+                                                "[MATE PAUSE] "
+                                                f"{mate_pause:.2f}s before {best_san}"
+                                            )
+                                            time.sleep(mate_pause)
+
+                                        timing_delay_done = True
+                                        if position_key in pending_bot_moves:
+                                            pending_bot_moves[
+                                                position_key
+                                            ]["timing_delay_done"] = True
+
                                     set_bot_ui_state("CLICKING")
 
                                     clicked = click_move(
@@ -4013,6 +4091,13 @@ def main():
                                         < BOT_CLICK_RETRIES
                                     ):
                                         retry_count += 1
+
+                                        time.sleep(
+                                            random.uniform(
+                                                RETRY_DELAY_MIN,
+                                                RETRY_DELAY_MAX
+                                            )
+                                        )
 
                                         # EXTRA 2-second whole-board catch-up while a
                                         # frozen Stockfish move is being retried. This

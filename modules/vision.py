@@ -77,10 +77,125 @@ def get_scrcpy_screen_origin(hwnd):
 
 
 def left_click_screen(x, y):
-    # Direct Win32 dispatch. No artificial cursor/hold sleeps.
-    user32.SetCursorPos(int(x), int(y))
-    user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-    user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+    target_x = int(x)
+    target_y = int(y)
+
+    try:
+        point = wintypes.POINT()
+        if user32.GetCursorPos(ctypes.byref(point)):
+            start_x = int(point.x)
+            start_y = int(point.y)
+        else:
+            start_x = target_x
+            start_y = target_y
+    except Exception:
+        start_x = target_x
+        start_y = target_y
+
+    distance = math.hypot(
+        target_x - start_x,
+        target_y - start_y
+    )
+
+    if distance < 3.0:
+        user32.SetCursorPos(
+            target_x,
+            target_y
+        )
+    else:
+        steps = int(
+            max(
+                CURSOR_PATH_STEPS_MIN,
+                min(
+                    CURSOR_PATH_STEPS_MAX,
+                    round(distance / 180.0) + CURSOR_PATH_STEPS_MIN
+                )
+            )
+        )
+
+        dx = target_x - start_x
+        dy = target_y - start_y
+        inv_distance = 1.0 / max(distance, 1.0)
+        normal_x = -dy * inv_distance
+        normal_y = dx * inv_distance
+
+        max_bend = min(
+            CURSOR_PATH_MAX_BEND_PX,
+            max(
+                3.0,
+                distance * CURSOR_PATH_CURVE_FRACTION
+            )
+        )
+        bend = random.uniform(
+            -max_bend,
+            max_bend
+        )
+
+        for step in range(1, steps + 1):
+            t = step / float(steps)
+            eased = t * t * (3.0 - 2.0 * t)
+            bend_factor = 4.0 * eased * (1.0 - eased)
+            micro_jitter = (
+                random.uniform(
+                    -CURSOR_PATH_JITTER_PX,
+                    CURSOR_PATH_JITTER_PX
+                )
+                if step < steps
+                else 0.0
+            )
+
+            user32.SetCursorPos(
+                int(round(
+                    start_x
+                    + dx * eased
+                    + normal_x * bend * bend_factor
+                    + micro_jitter
+                )),
+                int(round(
+                    start_y
+                    + dy * eased
+                    + normal_y * bend * bend_factor
+                    + micro_jitter
+                ))
+            )
+
+            if step < steps:
+                time.sleep(
+                    random.uniform(
+                        CURSOR_PATH_STEP_DELAY_MIN,
+                        CURSOR_PATH_STEP_DELAY_MAX
+                    )
+                )
+
+    time.sleep(
+        random.uniform(
+            CLICK_CURSOR_SETTLE_MIN,
+            CLICK_CURSOR_SETTLE_MAX
+        )
+    )
+
+    user32.mouse_event(
+        MOUSEEVENTF_LEFTDOWN,
+        0,
+        0,
+        0,
+        0
+    )
+
+    time.sleep(
+        random.uniform(
+            CLICK_HOLD_MIN,
+            CLICK_HOLD_MAX
+        )
+    )
+
+    user32.mouse_event(
+        MOUSEEVENTF_LEFTUP,
+        0,
+        0,
+        0,
+        0
+    )
     return True
 
 
