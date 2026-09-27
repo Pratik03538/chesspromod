@@ -660,8 +660,19 @@ def main():
     )
 
     opponent_match_history = []
+    opponent_engine_match_history = []
+    opponent_accuracy_live = None
+    opponent_engine_flag = False
+    opponent_loss_mode = False
+    bot_accuracy_history = []
     next_human_best_uci = None
+    next_human_top2_uci = []
     opponent_pressure = False
+
+    draw_overlay._opponent_accuracy = None
+    draw_overlay._opponent_engine_flag = False
+    draw_overlay._opponent_loss_mode = False
+    draw_overlay._bot_accuracy = None
 
     # Screen-interruption guard. This is session state and does not alter
     # the chess board/grid state. A large unexpected visual change inside
@@ -1848,8 +1859,18 @@ def main():
                     )
 
                     opponent_match_history.clear()
+                    opponent_engine_match_history.clear()
+                    opponent_accuracy_live = None
+                    opponent_engine_flag = False
+                    opponent_loss_mode = False
+                    bot_accuracy_history.clear()
+                    draw_overlay._opponent_accuracy = None
+                    draw_overlay._opponent_engine_flag = False
+                    draw_overlay._opponent_loss_mode = False
+                    draw_overlay._bot_accuracy = None
 
                     next_human_best_uci = None
+                    next_human_top2_uci = []
                     opponent_pressure = False
                     _advantage_progress_target_cp = None
                     _advantage_progress_hold_moves = 0
@@ -2147,6 +2168,7 @@ def main():
                         opponent_match_history.clear()
                         out_of_book = False
                         next_human_best_uci = None
+                        next_human_top2_uci = []
                         last_bot_position_key = None
                         pending_bot_moves.clear()
 
@@ -2818,7 +2840,17 @@ def main():
                                     out_of_book = False
                                     analysis_state = None
                                     opponent_match_history.clear()
+                                    opponent_engine_match_history.clear()
+                                    opponent_accuracy_live = None
+                                    opponent_engine_flag = False
+                                    opponent_loss_mode = False
+                                    bot_accuracy_history.clear()
+                                    draw_overlay._opponent_accuracy = None
+                                    draw_overlay._opponent_engine_flag = False
+                                    draw_overlay._opponent_loss_mode = False
+                                    draw_overlay._bot_accuracy = None
                                     next_human_best_uci = None
+                                    next_human_top2_uci = []
                                     opponent_pressure = False
                                     last_bot_position_key = None
                                     pending_bot_moves.clear()
@@ -2984,6 +3016,98 @@ def main():
                             )
                             opponent_pressure = False
 
+                            # Fresh live #1/#2 reference for the exact position
+                            # before the opponent move. This is separate from
+                            # the older top-1 adaptive-pressure history.
+                            opponent_engine_top2 = []
+                            try:
+                                opponent_ref_result = engine.analyse(
+                                    board,
+                                    chess.engine.Limit(
+                                        depth=ANALYSIS_DEPTH,
+                                        time=ANALYSIS_TIME
+                                    ),
+                                    multipv=2
+                                )
+
+                                if not isinstance(
+                                    opponent_ref_result,
+                                    list
+                                ):
+                                    opponent_ref_result = [
+                                        opponent_ref_result
+                                    ]
+
+                                for opponent_ref_info in opponent_ref_result[:2]:
+                                    opponent_ref_pv = opponent_ref_info.get(
+                                        "pv",
+                                        []
+                                    )
+                                    if opponent_ref_pv:
+                                        opponent_ref_move = opponent_ref_pv[0]
+                                        if opponent_ref_move in board.legal_moves:
+                                            opponent_engine_top2.append(
+                                                opponent_ref_move.uci()
+                                            )
+                            except Exception as opponent_ref_error:
+                                print(
+                                    f"[OPPONENT] live #1/#2 reference unavailable: "
+                                    f"{opponent_ref_error}"
+                                )
+
+                            next_human_top2_uci = list(
+                                opponent_engine_top2
+                            )
+
+                            if opponent_engine_top2:
+                                engine_top2_match = (
+                                    move.uci()
+                                    in opponent_engine_top2
+                                )
+
+                                opponent_engine_match_history.append(
+                                    1.0
+                                    if engine_top2_match
+                                    else 0.0
+                                )
+
+                                (
+                                    opponent_accuracy_live,
+                                    opponent_engine_sample_count
+                                ) = opponent_recent_accuracy(
+                                    opponent_engine_match_history
+                                )
+
+                                if (
+                                    opponent_engine_sample_count
+                                    >= OPPONENT_ENGINE_FLAG_MIN_SAMPLES
+                                    and opponent_accuracy_live
+                                    > OPPONENT_ENGINE_FLAG_THRESHOLD
+                                ):
+                                    opponent_engine_flag = True
+                                    opponent_loss_mode = True
+
+                                draw_overlay._opponent_accuracy = (
+                                    opponent_accuracy_live
+                                )
+                                draw_overlay._opponent_engine_flag = (
+                                    opponent_engine_flag
+                                )
+                                draw_overlay._opponent_loss_mode = (
+                                    opponent_loss_mode
+                                )
+
+                                print(
+                                    f"[OPPONENT ENGINE] "
+                                    f"move={move.uci()} "
+                                    f"TOP2_MATCH={'YES' if engine_top2_match else 'NO'} "
+                                    f"TOP2={','.join(opponent_engine_top2)} "
+                                    f"ACCURACY={opponent_accuracy_live:.1f}% "
+                                    f"SAMPLES={opponent_engine_sample_count} "
+                                    f"FLAG={'YES' if opponent_engine_flag else 'NO'} "
+                                    f"MODE={'LOSS' if opponent_loss_mode else 'NORMAL'}"
+                                )
+
                             if expected_human_uci:
                                 exact_top_match = (
                                     100.0
@@ -3092,6 +3216,7 @@ def main():
                             )
 
                             next_human_best_uci = None
+                            next_human_top2_uci = []
 
                             board.push(
                                 move
@@ -3392,7 +3517,8 @@ def main():
                                             opponent_accuracy=opponent_accuracy,
                                             opponent_sample_count=opponent_sample_count,
                                             opponent_pressure=opponent_pressure,
-                                            engine=engine
+                                            engine=engine,
+                                            opponent_engine_mode=opponent_loss_mode
                                         )
 
                                         opponent_pressure = False
@@ -4051,6 +4177,58 @@ def main():
                                         best_info=result
                                     )
 
+                                    try:
+                                        bot_best_cp = int(
+                                            selection_meta.get(
+                                                "current_cp",
+                                                selection_meta.get("selected_cp", 0)
+                                            )
+                                        )
+                                        bot_selected_cp = int(
+                                            selection_meta.get(
+                                                "selected_cp",
+                                                bot_best_cp
+                                            )
+                                        )
+
+                                        bot_loss_cp = max(
+                                            0,
+                                            bot_best_cp - bot_selected_cp
+                                        )
+
+                                        bot_move_accuracy = (
+                                            100.0
+                                            if bot_loss_cp <= 0
+                                            else max(
+                                                0.0,
+                                                min(
+                                                    100.0,
+                                                    100.0 * math.exp(
+                                                        -bot_loss_cp / 150.0
+                                                    )
+                                                )
+                                            )
+                                        )
+
+                                        bot_accuracy_history.append(
+                                            bot_move_accuracy
+                                        )
+
+                                        if len(bot_accuracy_history) > OPPONENT_ACCURACY_WINDOW:
+                                            del bot_accuracy_history[
+                                                :-OPPONENT_ACCURACY_WINDOW
+                                            ]
+
+                                        draw_overlay._bot_accuracy = (
+                                            sum(bot_accuracy_history)
+                                            / len(bot_accuracy_history)
+                                        )
+                                    except Exception as bot_accuracy_error:
+                                        print(
+                                            f"[BOT ACCURACY] unavailable: "
+                                            f"{bot_accuracy_error}"
+                                        )
+
                                     if analysis_state:
                                         predicted = analysis_state.get(
                                             "best_move"
@@ -4205,6 +4383,10 @@ def main():
                     else:
                         draw_overlay._match_state = "PLAYING"
                         set_bot_ui_state("PLAYING BOT MOVE")
+
+                    draw_overlay._opponent_accuracy = opponent_accuracy_live
+                    draw_overlay._opponent_engine_flag = opponent_engine_flag
+                    draw_overlay._opponent_loss_mode = opponent_loss_mode
 
                     display_frame = draw_overlay(
                         display_frame,
