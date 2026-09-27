@@ -771,23 +771,41 @@ def verify_bot_move(
     board_coords,
     black_perspective
 ):
-    """Fast closed-loop bot verification.
+    """Closed-loop bot verification with consecutive full-board confirmation.
 
-    Uses one cheap whole-board motion map plus exact classification only on
-    affected squares. Internal board is not advanced until this succeeds.
+    Fast motion/affected-square validation is followed by strict full-board
+    validation. The physical post-state must match the expected position for
+    BOT_CONFIRM_SAMPLES consecutive captures before the internal board may
+    advance. A single false frame can therefore never acknowledge a bot move.
     """
     start = time.perf_counter()
     deadline = start + BOT_VERIFY_TIMEOUT
     last_frame = None
     last_reason = "post-move state not yet confirmed"
+    stable_full_matches = 0
+    required_samples = max(
+        1,
+        int(BOT_CONFIRM_SAMPLES)
+    )
+    expected_after = expected_board_after_move(
+        board,
+        move
+    )
 
     while time.perf_counter() < deadline:
-        after_frame = capture_screen(sct, hwnd)
+        after_frame = capture_screen(
+            sct,
+            hwnd
+        )
+
         if after_frame is None:
-            time.sleep(BOT_RECOVERY_POLL)
+            time.sleep(
+                BOT_RECOVERY_POLL
+            )
             continue
 
         last_frame = after_frame
+
         ok, reason = fast_expected_post_state_confirmed(
             before_frame,
             after_frame,
@@ -796,18 +814,8 @@ def verify_bot_move(
             board_coords,
             black_perspective
         )
-        if ok:
-            # Fast motion/exact affected-square validation is only the first gate.
-            # The final authority is the complete physical chess position.
-            # Every Stockfish move must match the full expected board before
-            # the caller is allowed to advance python-chess. If the move never
-            # physically landed, this check fails and the existing retry path
-            # will click the same frozen move again.
-            expected_after = expected_board_after_move(
-                board,
-                move
-            )
 
+        if ok:
             full_ok, full_reason = full_board_state_confirmed(
                 after_frame,
                 expected_after,
@@ -816,19 +824,41 @@ def verify_bot_move(
             )
 
             if full_ok:
-                return True, after_frame, (
-                    "scrcpy full-board match 64/64; "
-                    + reason
+                stable_full_matches += 1
+
+                if stable_full_matches >= required_samples:
+                    return True, after_frame, (
+                        "scrcpy full-board match 64/64; "
+                        f"stable={stable_full_matches}/{required_samples}; "
+                        + reason
+                    )
+
+                last_reason = (
+                    "strict full-board match received; waiting for "
+                    "consecutive physical confirmation "
+                    f"{stable_full_matches}/{required_samples}"
                 )
 
+                time.sleep(
+                    max(
+                        float(BOT_CONFIRM_GAP),
+                        0.001
+                    )
+                )
+                continue
+
+            stable_full_matches = 0
             last_reason = (
-                "fast post-state passed but scrcpy full-board rejected: "
+                "fast post-state passed but strict full-board confirmation "
+                "was not stable: "
                 + full_reason
             )
         else:
+            stable_full_matches = 0
             last_reason = reason
-        time.sleep(BOT_RECOVERY_POLL)
+
+        time.sleep(
+            BOT_RECOVERY_POLL
+        )
 
     return False, last_frame, last_reason
-
-
