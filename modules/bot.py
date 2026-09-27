@@ -508,19 +508,17 @@ def click_move(
         f"source=({sx},{sy}) target=({tx},{ty})"
     )
 
-    # Keep the mouse cursor completely away from the chess board between
-    # moves. This prevents it from remaining on the previous source/target.
-    user32.SetCursorPos(0, 0)
-    time.sleep(0.010)
+    # Move to the source along a short, slightly curved path.
+    # Timing stays intentionally small so the playing speed remains high.
+    move_cursor_human_like(sx, sy)
+    time.sleep(
+        random.uniform(
+            CLICK_CURSOR_SETTLE_MIN,
+            CLICK_CURSOR_SETTLE_MAX
+        )
+    )
 
     # Select the locked source with a real press/hold/release sequence.
-    # The slightly longer hold makes source registration more reliable
-    # through scrcpy than the previous zero-duration dispatch.
-    user32.SetCursorPos(
-        int(sx),
-        int(sy)
-    )
-    time.sleep(0.020)
     user32.mouse_event(
         MOUSEEVENTF_LEFTDOWN,
         0,
@@ -528,7 +526,12 @@ def click_move(
         0,
         0
     )
-    time.sleep(0.035)
+    time.sleep(
+        random.uniform(
+            CLICK_HOLD_MIN,
+            CLICK_HOLD_MAX
+        )
+    )
     user32.mouse_event(
         MOUSEEVENTF_LEFTUP,
         0,
@@ -537,15 +540,23 @@ def click_move(
         0
     )
 
-    time.sleep(0.025)
-
-    # Drop only on the locked destination, again using a real
-    # press/hold/release sequence.
-    user32.SetCursorPos(
-        int(tx),
-        int(ty)
+    time.sleep(
+        random.uniform(
+            CLICK_BETWEEN_MIN,
+            CLICK_BETWEEN_MAX
+        )
     )
-    time.sleep(0.020)
+
+    # Move to the locked destination with the same short natural path.
+    move_cursor_human_like(tx, ty)
+    time.sleep(
+        random.uniform(
+            CLICK_CURSOR_SETTLE_MIN,
+            CLICK_CURSOR_SETTLE_MAX
+        )
+    )
+
+    # Drop using a real press/hold/release sequence.
     user32.mouse_event(
         MOUSEEVENTF_LEFTDOWN,
         0,
@@ -553,7 +564,12 @@ def click_move(
         0,
         0
     )
-    time.sleep(0.030)
+    time.sleep(
+        random.uniform(
+            CLICK_HOLD_MIN,
+            CLICK_HOLD_MAX
+        )
+    )
     user32.mouse_event(
         MOUSEEVENTF_LEFTUP,
         0,
@@ -561,11 +577,6 @@ def click_move(
         0,
         0
     )
-
-    # Immediately park the cursor outside the board. It must not sit on
-    # the old move while the system is waiting for the verified result.
-    user32.SetCursorPos(0, 0)
-    time.sleep(0.010)
 
     if move.promotion is not None:
         if promotion_color is None:
