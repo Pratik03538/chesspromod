@@ -675,7 +675,14 @@ def grid_conf_dict(
         values
     )
 
-    while len(_GRID_CONF_CACHE) > _GRID_CONF_CACHE_MAX:
+    grid_conf_cache_max = int(
+        globals().get(
+            "_GRID_CONF_CACHE_MAX",
+            8
+        )
+    )
+
+    while len(_GRID_CONF_CACHE) > grid_conf_cache_max:
         oldest_key = next(
             iter(_GRID_CONF_CACHE)
         )
