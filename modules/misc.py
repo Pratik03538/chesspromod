@@ -1165,6 +1165,130 @@ def main():
                     screen_interrupt_bad_samples = 0
                     screen_interrupt_clear_samples = 0
 
+                # ============================================================
+                # MANUAL NEW MATCH DETECTION DURING ACTIVE PLAY
+                # ============================================================
+                # A manual New/Rematch can replace the live game without any
+                # normal result screen. We only run this heavier check after
+                # the screen-guard has already detected a large unexpected
+                # board transition, so normal moves are not slowed down.
+                if (
+                    game_ready
+                    and grid_locked
+                    and cached_board_coords
+                    and not awaiting_new_match
+                    and board.move_stack
+                    and screen_interrupted
+                ):
+                    now_manual = time.perf_counter()
+
+                    if now_manual >= next_manual_new_match_check:
+                        next_manual_new_match_check = (
+                            now_manual + 0.20
+                        )
+
+                        manual_grid, _, manual_scan_ms = (
+                            scan_board(
+                                frame,
+                                cached_board_coords
+                            )
+                        )
+
+                        detected_piece_count = sum(
+                            1
+                            for row in manual_grid
+                            for symbol in row
+                            if symbol is not None
+                        )
+
+                        if detected_piece_count >= 20:
+                            start_board = chess.Board(
+                                INITIAL_FEN
+                            )
+
+                            manual_new_match_key = None
+
+                            for manual_black_perspective in (
+                                False,
+                                True
+                            ):
+                                start_ok, _ = (
+                                    full_board_state_confirmed(
+                                        frame,
+                                        start_board,
+                                        cached_board_coords,
+                                        manual_black_perspective
+                                    )
+                                )
+
+                                if start_ok:
+                                    manual_new_match_key = (
+                                        f"{int(manual_black_perspective)}:START"
+                                    )
+                                    break
+
+                                if manual_black_perspective:
+                                    manual_first_move = (
+                                        detect_existing_white_first_move(
+                                            frame,
+                                            start_board,
+                                            cached_board_coords,
+                                            True
+                                        )
+                                    )
+
+                                    if manual_first_move is not None:
+                                        manual_first_board = (
+                                            expected_board_after_move(
+                                                start_board,
+                                                manual_first_move
+                                            )
+                                        )
+
+                                        first_ok, _ = (
+                                            full_board_state_confirmed(
+                                                frame,
+                                                manual_first_board,
+                                                cached_board_coords,
+                                                True
+                                            )
+                                        )
+
+                                        if first_ok:
+                                            manual_new_match_key = (
+                                                f"1:{manual_first_move.uci()}"
+                                            )
+                                            break
+
+                            if manual_new_match_key is not None:
+                                awaiting_new_match = True
+                                game_ready = False
+                                cached_board_grid = None
+                                baseline_frame = None
+
+                                screen_interrupted = False
+                                screen_interrupt_bad_samples = 0
+                                screen_interrupt_clear_samples = 0
+                                screen_interrupt_fraction = 0.0
+
+                                draw_overlay._rank_history.clear()
+                                draw_overlay._move_history_text = "-"
+
+                                new_match_button_stable = 0
+                                new_match_button_center = None
+                                new_match_click_attempts = 0
+                                next_new_match_scan = (
+                                    time.perf_counter()
+                                    + 0.05
+                                )
+                                new_match_start_stable = 0
+                                new_match_start_key = None
+                                new_match_scan_ms = manual_scan_ms
+                                next_manual_new_match_check = (
+                                    time.perf_counter()
+                                    + 1.0
+                                )
+
                 if key == ord("r"):
                     height, width = frame.shape[:2]
 
