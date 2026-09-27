@@ -1435,6 +1435,8 @@ def main():
                                         best_move
                                     )
 
+                                    mate_pause_done = False
+
                                     pending_bot_moves[
                                         position_key
                                     ] = {
