@@ -476,6 +476,19 @@ def choose_stockfish_move(
             choose_stockfish_move._recent_human_ranks = (
                 recent_ranks + [selected_rank]
             )[-3:]
+
+            if current_advantage >= 300:
+                choose_stockfish_move._winning_conversion_cycle = (
+                    getattr(
+                        choose_stockfish_move,
+                        "_winning_conversion_cycle",
+                        0
+                    )
+                    + 1
+                )
+            else:
+                choose_stockfish_move._winning_conversion_cycle = 0
+
             return selected_candidate
 
         weighted = []
@@ -633,6 +646,18 @@ def choose_stockfish_move(
         choose_stockfish_move._recent_human_ranks = (
             recent_ranks + [selected_rank]
         )[-3:]
+
+        if current_advantage >= 300:
+            choose_stockfish_move._winning_conversion_cycle = (
+                getattr(
+                    choose_stockfish_move,
+                    "_winning_conversion_cycle",
+                    0
+                )
+                + 1
+            )
+        else:
+            choose_stockfish_move._winning_conversion_cycle = 0
 
         return selected_candidate
 
