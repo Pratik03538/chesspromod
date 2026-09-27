@@ -538,6 +538,50 @@ def draw_overlay(
         1
     )
 
+    # Live player-accuracy readout. Opponent accuracy is
+    # based on recent #1/#2 engine-choice matches. A threshold breach
+    # is shown as a red flag and the runtime switches to loss mode.
+    shown_bot_accuracy = getattr(
+        draw_overlay,
+        "_bot_accuracy",
+        None
+    )
+
+    shown_opponent_accuracy = getattr(
+        draw_overlay,
+        "_opponent_accuracy",
+        None
+    )
+
+    opponent_engine_flag = bool(
+        getattr(
+            draw_overlay,
+            "_opponent_engine_flag",
+            False
+        )
+    )
+
+    accuracy_line = (
+        "YOU ACC --"
+        if shown_bot_accuracy is None
+        else f"YOU ACC {float(shown_bot_accuracy):.1f}%"
+    ) + "  |  " + (
+        "OPP ACC --"
+        if shown_opponent_accuracy is None
+        else f"OPP ACC {float(shown_opponent_accuracy):.1f}%"
+    )
+
+    put(
+        accuracy_line,
+        panel_x + 16,
+        panel_y + 80,
+        0.28,
+        (228, 90, 90)
+        if opponent_engine_flag
+        else (165, 190, 215),
+        1
+    )
+
     card(
         panel_y + 82,
         panel_y + 137
@@ -601,6 +645,9 @@ def draw_overlay(
         (120, 140, 165),
         1
     )
+
+    if opponent_engine_flag and match_state == "PLAYING":
+        bot_state = "ENGINE FLAG • LOSS MODE"
 
     visible_state = (
         bot_state
