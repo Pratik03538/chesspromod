@@ -491,6 +491,29 @@ def main():
     global _advantage_progress_hold_moves
     global _advantage_progress_hold_limit
     global _advantage_progress_side
+
+    # Keep the terminal clean. All user-facing move/rank output is rendered
+    # by the game UI instead of the diagnostic console.
+    builtins_module = __import__(
+        "builtins"
+    )
+
+    if not hasattr(
+        builtins_module,
+        "_chess_original_print"
+    ):
+        builtins_module._chess_original_print = (
+            builtins_module.print
+        )
+
+    def _quiet_chess_print(
+        *args,
+        **kwargs
+    ):
+        return None
+
+    builtins_module.print = _quiet_chess_print
+
     print(
         "============================================================"
     )
@@ -600,6 +623,13 @@ def main():
     human_color = None
     status = "READY - PRESS R"
     analysis_state = None
+
+    draw_overlay._rank_history = {}
+    draw_overlay._move_history_text = format_move_history(
+        board,
+        draw_overlay._rank_history
+    )
+
     last_wait_status = ""
     last_wait_report = 0.0
 
@@ -1105,6 +1135,12 @@ def main():
                     analysis_state = None
                     out_of_book = False
 
+                    draw_overlay._rank_history.clear()
+                    draw_overlay._move_history_text = format_move_history(
+                        board,
+                        draw_overlay._rank_history
+                    )
+
                     opponent_match_history.clear()
 
                     next_human_best_uci = None
@@ -1284,6 +1320,11 @@ def main():
                             game_ready = True
                             analysis_state = None
 
+                            draw_overlay._move_history_text = format_move_history(
+                                board,
+                                draw_overlay._rank_history
+                            )
+
                             opponent_match_history.clear()
                             next_human_best_uci = None
                             opponent_pressure = False
@@ -1460,6 +1501,11 @@ def main():
 
                         game_ready = True
 
+                        draw_overlay._move_history_text = format_move_history(
+                            board,
+                            draw_overlay._rank_history
+                        )
+
                         print(
                             "[INFO] Bottom side:",
                             (
@@ -1541,7 +1587,32 @@ def main():
                             else:
                                 new_match_button_stable += 1
 
-                            if new_match_button_stable >= 2:
+                            ui_state = getattr(
+                                draw_overlay,
+                                "_ui_state",
+                                {
+                                    "new_game": True,
+                                    "rematch": False
+                                }
+                            )
+
+                            if (
+                                new_match_button_stable >= 2
+                                and (
+                                    bool(
+                                        ui_state.get(
+                                            "new_game",
+                                            True
+                                        )
+                                    )
+                                    or bool(
+                                        ui_state.get(
+                                            "rematch",
+                                            False
+                                        )
+                                    )
+                                )
+                            ):
                                 now = time.perf_counter()
 
                                 if (
@@ -1556,13 +1627,35 @@ def main():
                                         origin is not None
                                         and focus_scrcpy(scrcpy_hwnd)
                                     ):
+                                        use_rematch = bool(
+                                            ui_state.get(
+                                                "rematch",
+                                                False
+                                            )
+                                        )
+
+                                        action_button = (
+                                            (
+                                                int(
+                                                    frame.shape[1]
+                                                    * 0.565
+                                                ),
+                                                int(
+                                                    frame.shape[0]
+                                                    * 0.392
+                                                )
+                                            )
+                                            if use_rematch
+                                            else result_button
+                                        )
+
                                         click_x = (
                                             origin[0]
-                                            + result_button[0]
+                                            + action_button[0]
                                         )
                                         click_y = (
                                             origin[1]
-                                            + result_button[1]
+                                            + action_button[1]
                                         )
 
                                         left_click_screen(
@@ -1632,6 +1725,9 @@ def main():
                                             screen_interrupt_bad_samples = 0
                                             screen_interrupt_clear_samples = 0
                                             screen_interrupt_fraction = 0.0
+
+                                            draw_overlay._rank_history.clear()
+                                            draw_overlay._move_history_text = "-"
 
                                             new_match_button_stable = 0
                                             new_match_button_center = None
@@ -1785,6 +1881,11 @@ def main():
                                     board.push(
                                         fresh_first_move
                                     )
+
+                                draw_overlay._move_history_text = format_move_history(
+                                    board,
+                                    draw_overlay._rank_history
+                                )
 
                                 awaiting_new_match = False
                                 game_ready = True
@@ -2065,6 +2166,11 @@ def main():
 
                             board.push(
                                 move
+                            )
+
+                            draw_overlay._move_history_text = format_move_history(
+                                board,
+                                draw_overlay._rank_history
                             )
 
                             analysis_state = None
@@ -2916,6 +3022,25 @@ def main():
 
                                     board.push(
                                         best_move
+                                    )
+
+                                    draw_overlay._rank_history[
+                                        len(
+                                            board.move_stack
+                                        )
+                                    ] = (
+                                        int(
+                                            selection_meta.get(
+                                                "rank",
+                                                0
+                                            )
+                                        )
+                                        + 1
+                                    )
+
+                                    draw_overlay._move_history_text = format_move_history(
+                                        board,
+                                        draw_overlay._rank_history
                                     )
 
                                     analysis_state = build_analysis(
