@@ -365,12 +365,44 @@ def choose_stockfish_move(
         if not candidate_list:
             return None
 
-        if len(candidate_list) == 1:
-            return candidate_list[0]
+        # Do not allow #1 to repeat when at least one other safe move exists.
+        # This keeps the original quality filter and randomness, but prevents
+        # an entire game from collapsing into repeated engine-top moves.
+        selection_pool = candidate_list
+        previous_rank = getattr(
+            choose_stockfish_move,
+            "_last_human_rank",
+            None
+        )
+
+        if previous_rank == 0:
+            alternatives = [
+                candidate
+                for candidate in candidate_list
+                if int(
+                    candidate.get(
+                        "rank",
+                        0
+                    )
+                ) > 0
+            ]
+
+            if alternatives:
+                selection_pool = alternatives
+
+        if len(selection_pool) == 1:
+            selected_candidate = selection_pool[0]
+            choose_stockfish_move._last_human_rank = int(
+                selected_candidate.get(
+                    "rank",
+                    0
+                )
+            )
+            return selected_candidate
 
         weighted = []
 
-        for candidate in candidate_list:
+        for candidate in selection_pool:
             rank = int(
                 candidate.get(
                     "rank",
@@ -395,7 +427,7 @@ def choose_stockfish_move(
             # it.
             pool_best_cp = max(
                 item.get("cp", 0)
-                for item in candidate_list
+                for item in selection_pool
             )
             quality_gap = abs(
                 pool_best_cp
@@ -506,11 +538,20 @@ def choose_stockfish_move(
                 )
             )
 
-        return random.choices(
+        selected_candidate = random.choices(
             [item[0] for item in weighted],
             weights=[item[1] for item in weighted],
             k=1
         )[0]
+
+        choose_stockfish_move._last_human_rank = int(
+            selected_candidate.get(
+                "rank",
+                0
+            )
+        )
+
+        return selected_candidate
 
 
     def human_safety_floor_cp(
@@ -593,6 +634,23 @@ def choose_stockfish_move(
                 "reason": "no MultiPV candidates"
             }
         )
+
+    # Reset the human-like rank history only at the start of a new game
+    # (or at the first already-played position). Repeated calls on the same
+    # first position keep the same history instead of resetting randomly.
+    if len(board.move_stack) <= 1:
+        first_position_marker = board.fen()
+
+        if (
+            getattr(
+                choose_stockfish_move,
+                "_first_position_marker",
+                None
+            )
+            != first_position_marker
+        ):
+            choose_stockfish_move._last_human_rank = None
+            choose_stockfish_move._first_position_marker = first_position_marker
 
     mover = board.turn
     candidates = []
@@ -974,16 +1032,35 @@ def choose_stockfish_move(
             lazy_current_floor_cp
         )
 
-        acceptable_finishers = [
+        growth_finishers = [
             candidate
-            for candidate in candidates
+            for candidate in candidates[
+                :adaptive_max_rank + 1
+            ]
             if (
                 candidate["cp"]
-                >= lazy_floor_cp
+                >= (
+                    current_advantage
+                    + HUMAN_ADVANTAGE_GROWTH_TRIGGER_CP
+                )
                 and candidate["cp"]
                 > HUMAN_LIKE_LAZY_MIN_RESULT_CP
             )
         ]
+
+        if growth_finishers:
+            acceptable_finishers = growth_finishers
+        else:
+            acceptable_finishers = [
+                candidate
+                for candidate in candidates
+                if (
+                    candidate["cp"]
+                    >= lazy_floor_cp
+                    and candidate["cp"]
+                    > HUMAN_LIKE_LAZY_MIN_RESULT_CP
+                )
+            ]
 
         if not acceptable_finishers:
             acceptable_finishers = [
@@ -1044,14 +1121,30 @@ def choose_stockfish_move(
         else:
             low_rank_cap = 2
 
-        low_safe_candidates = [
+        low_growth_candidates = [
             candidate
             for candidate in candidates
             if (
                 candidate["rank"] <= low_rank_cap
-                and candidate["cp"] >= low_floor_cp
+                and candidate["cp"]
+                >= (
+                    current_advantage
+                    + HUMAN_ADVANTAGE_GROWTH_TRIGGER_CP
+                )
             )
         ]
+
+        if low_growth_candidates:
+            low_safe_candidates = low_growth_candidates
+        else:
+            low_safe_candidates = [
+                candidate
+                for candidate in candidates
+                if (
+                    candidate["rank"] <= low_rank_cap
+                    and candidate["cp"] >= low_floor_cp
+                )
+            ]
 
         if not low_safe_candidates:
             low_safe_candidates = [
@@ -1288,14 +1381,30 @@ def choose_stockfish_move(
     else:
         normal_rank_cap = 3
 
-    human_safe_candidates = [
+    growth_safe_candidates = [
         candidate
         for candidate in candidates
         if (
             candidate["rank"] <= normal_rank_cap
-            and candidate["cp"] >= human_floor_cp
+            and candidate["cp"]
+            >= (
+                current_advantage
+                + HUMAN_ADVANTAGE_GROWTH_TRIGGER_CP
+            )
         )
     ]
+
+    if growth_safe_candidates:
+        human_safe_candidates = growth_safe_candidates
+    else:
+        human_safe_candidates = [
+            candidate
+            for candidate in candidates
+            if (
+                candidate["rank"] <= normal_rank_cap
+                and candidate["cp"] >= human_floor_cp
+            )
+        ]
 
     if not human_safe_candidates:
         human_safe_candidates = [
