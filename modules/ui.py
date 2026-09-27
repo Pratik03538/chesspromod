@@ -427,6 +427,32 @@ def draw_overlay(
         cv2.LINE_AA
     )
 
+    watchdog_states = {
+        "THINKING",
+        "PRE-CLICK CHECK",
+        "CLICKING",
+        "VERIFYING BOT MOVE",
+        "RETRYING BOT MOVE"
+    }
+
+    if (
+        bot_state in watchdog_states
+        and state_age >= 5.0
+    ):
+        cv2.putText(
+            display_frame,
+            "CHECK",
+            (
+                panel_x + panel_w - 50,
+                panel_y + 126
+            ),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.28,
+            (190, 190, 195),
+            1,
+            cv2.LINE_AA
+        )
+
     buttons_y = panel_y + 126
     new_x1 = panel_x + 12
     new_y1 = buttons_y
