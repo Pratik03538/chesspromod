@@ -1994,26 +1994,14 @@ def main():
                     )
 
                     if result_button is not None:
-                        result_obstruction = 0.0
-
-                        if baseline_frame is not None:
-                            result_obstruction = (
-                                board_interruption_fraction(
-                                    baseline_frame,
-                                    frame,
-                                    cached_board_coords
-                                )
-                            )
-
+                        # Only the completed-result Rematch/New pair is a
+                        # result action. Never classify lower/colored controls as
+                        # a new-game action.
                         normal_result_layout = (
                             result_button is not None
-                            and not detect_new_game_button._abort_layout
                         )
 
-                        result_screen = (
-                            board.is_game_over()
-                            or normal_result_layout
-                        )
+                        result_screen = normal_result_layout
 
                         if result_screen:
                             save_game_pgn(
@@ -2026,11 +2014,7 @@ def main():
                                 termination=(
                                     None
                                     if board.is_game_over()
-                                    else (
-                                        "aborted"
-                                        if detect_new_game_button._abort_layout
-                                        else "result screen"
-                                    )
+                                    else "result screen"
                                 )
                             )
 
