@@ -711,9 +711,49 @@ def periodic_full_board_catchup_scan(
         )
         return None
 
-    candidates.sort(
-        key=lambda item: item["raw_pair"]
-    )
+    if pending_bot_move is None:
+        # Human-move recovery must not rely only on raw classifier mismatch.
+        # A legal move can be the true physical position even when one or two
+        # generic square classifications are noisy. Use the already-scanned
+        # frame_b board hypothesis to rank the legal candidates before the
+        # strict full-board check below.
+        for item in candidates:
+            try:
+                item["_recovery_hypothesis"] = board_hypothesis_score(
+                    board,
+                    item["human_move"],
+                    grid_b,
+                    conf_b,
+                    black_perspective
+                )
+            except Exception:
+                item["_recovery_hypothesis"] = {
+                    "normalized": 0.0,
+                    "exact": 0,
+                    "mismatch": 64
+                }
+
+        candidates.sort(
+            key=lambda item: (
+                -float(
+                    item["_recovery_hypothesis"].get(
+                        "normalized",
+                        0.0
+                    )
+                ),
+                -int(
+                    item["_recovery_hypothesis"].get(
+                        "exact",
+                        0
+                    )
+                ),
+                item["raw_pair"]
+            )
+        )
+    else:
+        candidates.sort(
+            key=lambda item: item["raw_pair"]
+        )
 
     evaluated = []
     for item in candidates[:TURN_RESCAN_TOP_CANDIDATES]:
