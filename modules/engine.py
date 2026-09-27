@@ -760,6 +760,8 @@ def choose_stockfish_move(
             choose_stockfish_move._last_human_rank = None
             choose_stockfish_move._recent_human_ranks = []
             choose_stockfish_move._winning_conversion_cycle = 0
+            choose_stockfish_move._winning_lock = False
+            choose_stockfish_move._peak_advantage_cp = 0
             choose_stockfish_move._first_position_marker = first_position_marker
 
     mover = board.turn
@@ -1110,10 +1112,11 @@ def choose_stockfish_move(
                 )
 
     # Persistent winning lock.
-    # Once the evaluation has shown a clear advantage, do not let the
-    # human-like randomness give the advantage away again. The lock stays
-    # active through temporary evaluation dips and is released only after
-    # the position has genuinely fallen back into danger.
+    # A clear advantage turns on conversion mode, but conversion mode does
+    # NOT mean "always play #1/#2". Any MultiPV move that keeps the position
+    # winning and improves or at least preserves the current advantage remains
+    # eligible. Lower ranks are welcome when their resulting evaluation is
+    # better than the current position.
     peak_advantage_cp = int(
         getattr(
             choose_stockfish_move,
@@ -1151,142 +1154,71 @@ def choose_stockfish_move(
     choose_stockfish_move._winning_lock = winning_lock
 
     if winning_lock:
-        # ------------------------------------------------------------
-        # PHASE A: KILL MODE
-        # At a large advantage, stop all deliberate inaccuracies and
-        # use the engine's strongest continuation. This is the critical
-        # anti-collapse rule: a +5 / +6 position cannot be followed by
-        # a random MultiPV #5-#8 move that throws the advantage away.
-        # ------------------------------------------------------------
-        if (
-            current_advantage >= WINNING_KILL_START_CP
-            or peak_advantage_cp >= WINNING_KILL_START_CP
-        ):
-            selected = best
-
-            choose_stockfish_move._last_human_rank = (
-                selected["rank"]
-            )
-            choose_stockfish_move._recent_human_ranks = (
-                list(
-                    getattr(
-                        choose_stockfish_move,
-                        "_recent_human_ranks",
-                        []
-                    )
-                )
-                + [selected["rank"]]
-            )[-3:]
-            choose_stockfish_move._winning_conversion_cycle = 0
-
-            return (
-                selected["move"],
-                selected["info"],
-                {
-                    "rank": selected["rank"],
-                    "current_cp": current_advantage,
-                    "selected_cp": selected["cp"],
-                    "reason": (
-                        "WINNING KILL MODE | "
-                        f"CURRENT={current_advantage / 100:+.2f} "
-                        f"PEAK={peak_advantage_cp / 100:+.2f} "
-                        f"BEST={best_cp / 100:+.2f}"
-                    )
-                }
-            )
-
-        # ------------------------------------------------------------
-        # PHASE B: WINNING SQUEEZE
-        # Keep some human-like variation, but only inside a very small
-        # engine-quality window. Prefer captures/checks/promotions among
-        # those near-best choices. No mistake/blunder/BAKWAS branch is
-        # allowed to run while this lock is active.
-        # ------------------------------------------------------------
-        squeeze_candidates = [
+        # First look for genuinely improving continuations. This is the key
+        # rule: if #3/#4/#5 is better than the current evaluated position,
+        # there is no reason to reject it just because #1 exists.
+        improving_candidates = [
             candidate
             for candidate in candidates
             if (
-                candidate["rank"] <= 2
+                candidate["rank"] <= min(
+                    7,
+                    len(candidates) - 1
+                )
                 and candidate["cp"] >= (
-                    best_cp
-                    - WINNING_SQUEEZE_GAP_CP
+                    current_advantage + 10
                 )
             )
         ]
 
-        if squeeze_candidates:
-            tactical_candidates = []
+        # If no move is above the separate current-position evaluation, use
+        # a very small preservation band. This avoids throwing away a win
+        # because two short analyses disagree by a few centipawns.
+        preserving_floor_cp = max(
+            250,
+            current_advantage - 60
+        )
 
-            for candidate in squeeze_candidates:
-                move = candidate["move"]
-                tactical_score = 0.0
-
-                if board.is_capture(move):
-                    captured_piece = board.piece_at(
-                        move.to_square
-                    )
-
-                    if (
-                        captured_piece is None
-                        and board.is_en_passant(move)
-                    ):
-                        tactical_score += 3.0
-                    elif captured_piece is not None:
-                        tactical_score += (
-                            3.0
-                            + min(
-                                material_value(
-                                    captured_piece.piece_type
-                                ),
-                                900
-                            ) / 900.0 * 2.0
-                        )
-
-                if board.gives_check(move):
-                    tactical_score += 2.5
-
-                if move.promotion is not None:
-                    tactical_score += 4.0
-
-                tactical_candidates.append(
-                    (
-                        candidate,
-                        tactical_score
-                    )
+        preserving_candidates = [
+            candidate
+            for candidate in candidates
+            if (
+                candidate["rank"] <= min(
+                    7,
+                    len(candidates) - 1
                 )
+                and candidate["cp"] >= preserving_floor_cp
+            )
+        ]
 
-            max_tactical = max(
-                score
-                for _, score in tactical_candidates
+        conversion_candidates = (
+            improving_candidates
+            if improving_candidates
+            else preserving_candidates
+        )
+
+        if conversion_candidates:
+            # Reuse the existing human selector so rank diversity,
+            # captures, checks, promotions and natural development still
+            # influence the choice. The selector is fed the full safe pool,
+            # not a pre-selected single move, so #3/#4/#5 can actually win.
+            selected = choose_human_candidate(
+                board,
+                conversion_candidates
             )
 
-            if max_tactical > 0:
-                tactical_pool = [
-                    candidate
-                    for candidate, score
-                    in tactical_candidates
-                    if score == max_tactical
-                ]
-            else:
-                tactical_pool = squeeze_candidates
-
-            selected = random.choice(
-                tactical_pool
+            capture_note = (
+                " | HUMAN CAPTURE"
+                if board.is_capture(selected["move"])
+                else ""
             )
 
-            choose_stockfish_move._last_human_rank = (
-                selected["rank"]
+            mode = (
+                "WINNING PROGRESS"
+                if improving_candidates
+                else "WINNING PRESERVE"
             )
-            choose_stockfish_move._recent_human_ranks = (
-                list(
-                    getattr(
-                        choose_stockfish_move,
-                        "_recent_human_ranks",
-                        []
-                    )
-                )
-                + [selected["rank"]]
-            )[-3:]
+
             choose_stockfish_move._winning_conversion_cycle = 0
 
             return (
@@ -1297,17 +1229,20 @@ def choose_stockfish_move(
                     "current_cp": current_advantage,
                     "selected_cp": selected["cp"],
                     "reason": (
-                        "WINNING SQUEEZE | "
+                        f"{mode} "
+                        f"(#{selected['rank'] + 1}) | "
                         f"CURRENT={current_advantage / 100:+.2f} "
                         f"PEAK={peak_advantage_cp / 100:+.2f} "
                         f"BEST={best_cp / 100:+.2f} "
-                        f"SELECTED={selected['cp'] / 100:+.2f}"
+                        f"SELECTED={selected['cp'] / 100:+.2f} "
+                        f"POOL={len(conversion_candidates)}"
+                        f"{capture_note}"
                     )
                 }
             )
 
-        # If the position has no near-best #1/#2 alternative, never fall
-        # through into the weaker human-like mistake branches.
+        # Safety fallback: if MultiPV gives no usable winning continuation,
+        # take the engine best move rather than allowing a deliberate mistake.
         selected = best
 
         choose_stockfish_move._last_human_rank = (
