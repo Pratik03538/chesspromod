@@ -2452,7 +2452,10 @@ def main():
                             # Human-White may already have made the first move
                             # before this polling frame arrived. Reuse the existing
                             # first-move detector and its strict physical check.
-                            elif fresh_human_color == chess.WHITE:
+                            if (
+                                not fresh_start_verified
+                                and fresh_human_color == chess.WHITE
+                            ):
                                 fresh_first_move = (
                                     detect_existing_white_first_move(
                                         frame,
