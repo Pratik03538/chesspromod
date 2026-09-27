@@ -1364,6 +1364,7 @@ def choose_stockfish_move(
 
     favorable_floor_active = (
         peak_advantage_cp >= MIN_POSITIVE_CP
+        and not opponent_engine_mode
     )
 
     if favorable_floor_active:
