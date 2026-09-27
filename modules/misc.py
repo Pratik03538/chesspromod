@@ -1810,6 +1810,14 @@ def main():
 
                                 if not verified:
                                     if not mate_pause_done:
+                                        reaction_delay = human_reaction_delay_seconds(
+                                            best_move,
+                                            board
+                                        )
+
+                                        if reaction_delay > 0.0:
+                                            time.sleep(reaction_delay)
+
                                         mate_pause = mate_pause_seconds(
                                             selected_info,
                                             board.turn
@@ -1879,6 +1887,13 @@ def main():
                                         < BOT_CLICK_RETRIES
                                     ):
                                         retry_count += 1
+
+                                        time.sleep(
+                                            random.uniform(
+                                                RETRY_DELAY_MIN,
+                                                RETRY_DELAY_MAX
+                                            )
+                                        )
 
                                         # EXTRA 2-second whole-board catch-up while a
                                         # frozen Stockfish move is being retried. This
