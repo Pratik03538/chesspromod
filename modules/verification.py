@@ -492,6 +492,25 @@ def full_board_state_confirmed(
             if expected_detected == expected_symbol:
                 continue
 
+        else:
+            # Empty squares use the stricter threshold so UI highlights and
+            # anti-aliasing are not mistaken for real pieces.
+            crop = get_square_crop(
+                frame,
+                board_coords,
+                square,
+                black_perspective
+            )
+
+            empty_detected, empty_score = classify_square(
+                crop,
+                templates,
+                match_threshold=EMPTY_DEST_MATCH_THRESHOLD
+            )
+
+            if empty_detected is None:
+                continue
+
         mismatches.append((
             chess.square_name(square),
             expected_symbol or "-",
