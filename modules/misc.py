@@ -3281,6 +3281,8 @@ def main():
                                 # Freeze the Stockfish decision for this board position.
                                 # The same move is used for click, verification and retry.
                                 locked_bot_move = None
+                                selected_info = None
+                                timing_delay_done = False
 
                                 if pending_entry is not None:
                                     locked_bot_move = (
