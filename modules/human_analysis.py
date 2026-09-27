@@ -349,11 +349,52 @@ def print_report(game_board=None):
         else 50.0
     )
 
+    # Deeper behavioral diagnostics.
+    timing_cv = _coefficient_of_variation(timings)
+    timing_consistency = _adjacent_similarity(timings)
+
+    quiet_delays = [
+        x["thinking_delay"]
+        for x in moves
+        if not (
+            "MATE" in x["reason"].upper()
+            or "CHECK" in x["reason"].upper()
+            or "CAPTURE" in x["reason"].upper()
+            or "DEEP CALC" in x["reason"].upper()
+            or "GREAT MOVE" in x["reason"].upper()
+        )
+    ]
+
+    tactical_mean = _mean(tactical_delays)
+    quiet_mean = _mean(quiet_delays)
+    tactical_quiet_delta = tactical_mean - quiet_mean
+
+    rank_entropy = _rank_entropy(ranks)
+    rank_one_rate = ranks.count(1) / len(ranks)
+    repeated_rank_rate = (
+        sum(1 for a, b in zip(ranks, ranks[1:]) if a == b)
+        / max(1, len(ranks) - 1)
+    )
+
+    drag_cv = _coefficient_of_variation(drag_times)
+    path_cv = _coefficient_of_variation(path_ratios)
+    offset_mean, offset_sd, avg_drag_distance = _touch_offset_stats(touch)
+
+    # A separate consistency indicator prevents a single aggregate score from
+    # hiding a very repetitive or very erratic timing pattern.
+    consistency_score = _clamp(
+        45.0
+        + min(timing_cv, 2.0) * 20.0
+        + timing_consistency * 0.35
+        + min(drag_cv, 2.0) * 8.0
+    )
+
     overall = _clamp(
-        timing_score * 0.30
-        + cursor_score * 0.25
-        + preference_score * 0.30
-        + tactical_timing_score * 0.15
+        timing_score * 0.27
+        + cursor_score * 0.23
+        + preference_score * 0.28
+        + tactical_timing_score * 0.12
+        + consistency_score * 0.10
     )
 
     _print(
@@ -368,6 +409,9 @@ def print_report(game_board=None):
         f"Timing behavior      : {timing_score:.1f}/100"
     )
     _print(
+        f"Timing CV / consistency: {timing_cv:.2f} / {timing_consistency:.1f}/100"
+    )
+    _print(
         f"Cursor/touch samples : {len(touch)}/{len(moves)}"
     )
 
@@ -380,6 +424,12 @@ def print_report(game_board=None):
     _print(
         f"Cursor behavior      : {cursor_score:.1f}/100"
     )
+    if touch:
+        _print(
+            f"Touch variation      : offset-sd={offset_sd:.1f}px "
+            f"avg-drag={avg_drag_distance:.1f}px "
+            f"drag-CV={drag_cv:.2f} path-CV={path_cv:.2f}"
+        )
     _print(
         "Move ranks           : "
         + ", ".join(
@@ -396,10 +446,22 @@ def print_report(game_board=None):
         f"Move preference      : {preference_score:.1f}/100"
     )
     _print(
+        f"Rank entropy         : {rank_entropy:.1f}/100 "
+        f"top-rank={rank_one_rate * 100.0:.1f}% "
+        f"repeat-rank={repeated_rank_rate * 100.0:.1f}%"
+    )
+    _print(
         f"Tactical moves       : {tactical_count}/{len(moves)}"
     )
     _print(
+        f"Tactical-vs-quiet   : tactical={tactical_mean:.3f}s "
+        f"quiet={quiet_mean:.3f}s delta={tactical_quiet_delta:+.3f}s"
+    )
+    _print(
         f"Tactical timing      : {tactical_timing_score:.1f}/100"
+    )
+    _print(
+        f"Behavior consistency : {consistency_score:.1f}/100"
     )
 
     if gaps:
