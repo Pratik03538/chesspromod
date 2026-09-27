@@ -3965,6 +3965,28 @@ def main():
                                         "physical board matches internal board 64/64"
                                     )
 
+                                    if random.random() < REACTION_OCCASIONAL_CHANCE:
+                                        reaction_delay = random.uniform(
+                                            REACTION_OCCASIONAL_MIN,
+                                            REACTION_OCCASIONAL_MAX
+                                        )
+                                    elif (
+                                        board.is_capture(best_move)
+                                        or board.gives_check(best_move)
+                                    ):
+                                        reaction_delay = random.uniform(
+                                            REACTION_NORMAL_MIN,
+                                            REACTION_NORMAL_MAX
+                                        )
+                                    else:
+                                        reaction_delay = random.uniform(
+                                            REACTION_FAST_MIN,
+                                            REACTION_FAST_MAX
+                                        )
+
+                                    if reaction_delay > 0.0:
+                                        time.sleep(reaction_delay)
+
                                     set_bot_ui_state("CLICKING")
 
                                     clicked = click_move(
@@ -4013,6 +4035,13 @@ def main():
                                         < BOT_CLICK_RETRIES
                                     ):
                                         retry_count += 1
+
+                                        time.sleep(
+                                            random.uniform(
+                                                RETRY_DELAY_MIN,
+                                                RETRY_DELAY_MAX
+                                            )
+                                        )
 
                                         # EXTRA 2-second whole-board catch-up while a
                                         # frozen Stockfish move is being retried. This
