@@ -717,7 +717,7 @@ def main():
                     display_frame is not None
                     and cached_board_coords is not None
                 ):
-                    draw_overlay(
+                    display_frame = draw_overlay(
                         display_frame,
                         cached_board_coords,
                         cached_board_grid,
@@ -3797,7 +3797,7 @@ def main():
                         draw_overlay._match_state = "PLAYING"
                         set_bot_ui_state("PLAYING BOT MOVE")
 
-                    draw_overlay(
+                    display_frame = draw_overlay(
                         display_frame,
                         cached_board_coords,
                         cached_board_grid,
