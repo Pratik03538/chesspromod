@@ -231,7 +231,7 @@ def draw_overlay(
         + 24
         + 24
         + 42
-        + 74
+        + 87
         + 16
         + button_h
         + 16
@@ -374,12 +374,32 @@ def draw_overlay(
         cv2.LINE_AA
     )
 
+    board_set_text = (
+        "BOARD: SET"
+        if locked
+        else "BOARD: NOT SET"
+    )
+
+    cv2.putText(
+        display_frame,
+        board_set_text,
+        (
+            panel_x + 12,
+            panel_y + 104
+        ),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.34,
+        (185, 185, 195),
+        1,
+        cv2.LINE_AA
+    )
+
     cv2.putText(
         display_frame,
         "BOT",
         (
             panel_x + 12,
-            panel_y + 109
+            panel_y + 122
         ),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.36,
@@ -393,7 +413,7 @@ def draw_overlay(
         bot_state,
         (
             panel_x + 58,
-            panel_y + 109
+            panel_y + 122
         ),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.41,
@@ -407,7 +427,7 @@ def draw_overlay(
         f"{state_age:.1f}s",
         (
             panel_x + panel_w - 52,
-            panel_y + 109
+            panel_y + 122
         ),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.34,
@@ -433,7 +453,7 @@ def draw_overlay(
             "CHECK",
             (
                 panel_x + panel_w - 50,
-                panel_y + 126
+                panel_y + 139
             ),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.28,
@@ -442,7 +462,7 @@ def draw_overlay(
             cv2.LINE_AA
         )
 
-    buttons_y = panel_y + 126
+    buttons_y = panel_y + 139
     new_x1 = panel_x + 12
     new_y1 = buttons_y
     new_x2 = new_x1 + button_w
