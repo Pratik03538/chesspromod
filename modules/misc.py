@@ -3530,7 +3530,6 @@ def main():
                                         )
 
                                     if thinking_delay > 0.0:
-                                        if thinking_delay > 0.0:
                                         set_bot_ui_state("THINKING")
                                         time.sleep(
                                             thinking_delay
