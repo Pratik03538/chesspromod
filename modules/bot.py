@@ -203,7 +203,10 @@ def select_promotion_piece(
         PROMOTION_RETRIES + 1
     ):
         time.sleep(
-            PROMOTION_WAIT
+            random.uniform(
+                PROMOTION_WAIT_MIN,
+                PROMOTION_WAIT_MAX
+            )
         )
 
         square = find_promotion_choice(
@@ -587,19 +590,100 @@ def click_move(
         f"target=({tx},{ty})"
     )
 
-    user32.SetCursorPos(
-        0,
-        0
+    # Move to source with a short, slightly variable human-like approach.
+    # The existing continuous curved source->midpoint->target drag below
+    # remains unchanged.
+    try:
+        point = wintypes.POINT()
+        if user32.GetCursorPos(ctypes.byref(point)):
+            start_x = int(point.x)
+            start_y = int(point.y)
+        else:
+            start_x = int(sx)
+            start_y = int(sy)
+    except Exception:
+        start_x = int(sx)
+        start_y = int(sy)
+
+    distance = math.hypot(
+        float(sx - start_x),
+        float(sy - start_y)
     )
 
-    # Move to source.
-    user32.SetCursorPos(
-        int(sx),
-        int(sy)
-    )
+    if distance < 3.0:
+        user32.SetCursorPos(int(sx), int(sy))
+    else:
+        steps = int(
+            max(
+                CURSOR_PATH_STEPS_MIN,
+                min(
+                    CURSOR_PATH_STEPS_MAX,
+                    round(distance / 180.0) + CURSOR_PATH_STEPS_MIN
+                )
+            )
+        )
+
+        dx_src = float(sx - start_x)
+        dy_src = float(sy - start_y)
+        inv_src = 1.0 / max(distance, 1.0)
+        normal_x_src = -dy_src * inv_src
+        normal_y_src = dx_src * inv_src
+        max_bend_src = min(
+            CURSOR_PATH_MAX_BEND_PX,
+            max(
+                3.0,
+                distance * CURSOR_PATH_CURVE_FRACTION
+            )
+        )
+        bend_src = random.uniform(
+            -max_bend_src,
+            max_bend_src
+        )
+
+        for step in range(1, steps + 1):
+            t = step / float(steps)
+            eased = t * t * (3.0 - 2.0 * t)
+            bend_factor = 4.0 * eased * (1.0 - eased)
+            micro_jitter = (
+                random.uniform(
+                    -CURSOR_PATH_JITTER_PX,
+                    CURSOR_PATH_JITTER_PX
+                )
+                if step < steps
+                else 0.0
+            )
+
+            px = (
+                start_x
+                + dx_src * eased
+                + normal_x_src * bend_src * bend_factor
+                + micro_jitter
+            )
+            py = (
+                start_y
+                + dy_src * eased
+                + normal_y_src * bend_src * bend_factor
+                + micro_jitter
+            )
+
+            user32.SetCursorPos(
+                int(round(px)),
+                int(round(py))
+            )
+
+            if step < steps:
+                time.sleep(
+                    random.uniform(
+                        CURSOR_PATH_STEP_DELAY_MIN,
+                        CURSOR_PATH_STEP_DELAY_MAX
+                    )
+                )
 
     time.sleep(
-        0.020
+        random.uniform(
+            CLICK_CURSOR_SETTLE_MIN,
+            CLICK_CURSOR_SETTLE_MAX
+        )
     )
 
     # One continuous drag gesture.
@@ -612,7 +696,10 @@ def click_move(
     )
 
     time.sleep(
-        0.035
+        random.uniform(
+            CLICK_HOLD_MIN,
+            CLICK_HOLD_MAX
+        )
     )
 
     # Slightly bent midpoint instead of a perfectly straight cursor line.
@@ -622,7 +709,10 @@ def click_move(
     )
 
     time.sleep(
-        0.012
+        random.uniform(
+            CLICK_BETWEEN_MIN,
+            CLICK_BETWEEN_MAX
+        )
     )
 
     # Final destination while still holding the mouse button.
@@ -632,7 +722,10 @@ def click_move(
     )
 
     time.sleep(
-        0.020
+        random.uniform(
+            CLICK_CURSOR_SETTLE_MIN,
+            CLICK_CURSOR_SETTLE_MAX
+        )
     )
 
     user32.mouse_event(
@@ -643,14 +736,13 @@ def click_move(
         0
     )
 
-    user32.SetCursorPos(
-        0,
-        0
-    )
-
-    # Let scrcpy/Android settle the completed drag before verification.
+    # Leave the pointer where the human-like drag ended instead of
+    # teleporting it away from the board.
     time.sleep(
-        0.018
+        random.uniform(
+            CLICK_CURSOR_SETTLE_MIN,
+            CLICK_CURSOR_SETTLE_MAX
+        )
     )
 
     if move.promotion is not None:
@@ -673,11 +765,8 @@ def click_move(
             black_perspective
         )
 
-        user32.SetCursorPos(
-            0,
-            0
-        )
-
+        # Leave the pointer at the promotion choice instead of teleporting
+        # it away from the board.
         return promotion_ok
 
     return True
