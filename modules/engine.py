@@ -365,39 +365,67 @@ def choose_stockfish_move(
         if not candidate_list:
             return None
 
-        # Do not allow #1 to repeat when at least one other safe move exists.
-        # This keeps the original quality filter and randomness, but prevents
-        # an entire game from collapsing into repeated engine-top moves.
-        selection_pool = candidate_list
-        previous_rank = getattr(
-            choose_stockfish_move,
-            "_last_human_rank",
-            None
+        # Keep the human-like randomness, but do not let the selector
+        # collapse into repeated #1/#2 choices when lower safe choices exist.
+        # After a top-two move, prefer a genuinely lower MultiPV choice.
+        selection_pool = list(candidate_list)
+        recent_ranks = list(
+            getattr(
+                choose_stockfish_move,
+                "_recent_human_ranks",
+                []
+            )
         )
 
-        if previous_rank == 0:
-            alternatives = [
-                candidate
-                for candidate in candidate_list
-                if int(
-                    candidate.get(
-                        "rank",
-                        0
-                    )
-                ) > 0
-            ]
+        if recent_ranks:
+            previous_rank = int(
+                recent_ranks[-1]
+            )
+        else:
+            previous_rank = getattr(
+                choose_stockfish_move,
+                "_last_human_rank",
+                None
+            )
 
-            if alternatives:
-                selection_pool = alternatives
+        lower_candidates = [
+            candidate
+            for candidate in candidate_list
+            if int(
+                candidate.get(
+                    "rank",
+                    0
+                )
+            ) >= 2
+        ]
+
+        if (
+            previous_rank in (0, 1)
+            and lower_candidates
+        ):
+            selection_pool = lower_candidates
+
+        elif (
+            len(recent_ranks) >= 2
+            and recent_ranks[-1] in (0, 1)
+            and recent_ranks[-2] in (0, 1)
+            and lower_candidates
+        ):
+            selection_pool = lower_candidates
 
         if len(selection_pool) == 1:
             selected_candidate = selection_pool[0]
-            choose_stockfish_move._last_human_rank = int(
+            selected_rank = int(
                 selected_candidate.get(
                     "rank",
                     0
                 )
             )
+
+            choose_stockfish_move._last_human_rank = selected_rank
+            choose_stockfish_move._recent_human_ranks = (
+                recent_ranks + [selected_rank]
+            )[-3:]
             return selected_candidate
 
         weighted = []
@@ -544,12 +572,17 @@ def choose_stockfish_move(
             k=1
         )[0]
 
-        choose_stockfish_move._last_human_rank = int(
+        selected_rank = int(
             selected_candidate.get(
                 "rank",
                 0
             )
         )
+
+        choose_stockfish_move._last_human_rank = selected_rank
+        choose_stockfish_move._recent_human_ranks = (
+            recent_ranks + [selected_rank]
+        )[-3:]
 
         return selected_candidate
 
@@ -650,6 +683,7 @@ def choose_stockfish_move(
             != first_position_marker
         ):
             choose_stockfish_move._last_human_rank = None
+            choose_stockfish_move._recent_human_ranks = []
             choose_stockfish_move._first_position_marker = first_position_marker
 
     mover = board.turn
@@ -1032,35 +1066,45 @@ def choose_stockfish_move(
             lazy_current_floor_cp
         )
 
-        growth_finishers = [
+        # Keep a real winning cushion, but allow several lower MultiPV
+        # choices so a large advantage does not force the bot to #1 every move.
+        lazy_allowed_drop_cp = min(
+            220,
+            max(
+                100,
+                int(
+                    100
+                    + max(
+                        0,
+                        current_advantage - 800
+                    ) * 0.40
+                )
+            )
+        )
+
+        lazy_current_floor_cp = (
+            current_advantage
+            - lazy_allowed_drop_cp
+        )
+
+        lazy_floor_cp = max(
+            50,
+            min(
+                lazy_floor_cp,
+                lazy_current_floor_cp
+            )
+        )
+
+        acceptable_finishers = [
             candidate
-            for candidate in candidates[
-                :adaptive_max_rank + 1
-            ]
+            for candidate in candidates
             if (
                 candidate["cp"]
-                >= (
-                    current_advantage
-                    + HUMAN_ADVANTAGE_GROWTH_TRIGGER_CP
-                )
+                >= lazy_floor_cp
                 and candidate["cp"]
                 > HUMAN_LIKE_LAZY_MIN_RESULT_CP
             )
         ]
-
-        if growth_finishers:
-            acceptable_finishers = growth_finishers
-        else:
-            acceptable_finishers = [
-                candidate
-                for candidate in candidates
-                if (
-                    candidate["cp"]
-                    >= lazy_floor_cp
-                    and candidate["cp"]
-                    > HUMAN_LIKE_LAZY_MIN_RESULT_CP
-                )
-            ]
 
         if not acceptable_finishers:
             acceptable_finishers = [
@@ -1121,30 +1165,41 @@ def choose_stockfish_move(
         else:
             low_rank_cap = 2
 
-        low_growth_candidates = [
+        # At low advantage, keep the position safe but do not require
+        # every move to improve the current evaluation. Human players often
+        # choose a reasonable move that maintains the position.
+        low_variation_drop_cp = min(
+            120,
+            max(
+                25,
+                int(
+                    max(
+                        50,
+                        abs(best_cp)
+                    ) * 0.30
+                )
+            )
+        )
+
+        low_variation_floor_cp = (
+            best_cp
+            - low_variation_drop_cp
+        )
+
+        if best_cp >= 0:
+            low_variation_floor_cp = max(
+                5,
+                low_variation_floor_cp
+            )
+
+        low_safe_candidates = [
             candidate
             for candidate in candidates
             if (
                 candidate["rank"] <= low_rank_cap
-                and candidate["cp"]
-                >= (
-                    current_advantage
-                    + HUMAN_ADVANTAGE_GROWTH_TRIGGER_CP
-                )
+                and candidate["cp"] >= low_variation_floor_cp
             )
         ]
-
-        if low_growth_candidates:
-            low_safe_candidates = low_growth_candidates
-        else:
-            low_safe_candidates = [
-                candidate
-                for candidate in candidates
-                if (
-                    candidate["rank"] <= low_rank_cap
-                    and candidate["cp"] >= low_floor_cp
-                )
-            ]
 
         if not low_safe_candidates:
             low_safe_candidates = [
@@ -1252,6 +1307,100 @@ def choose_stockfish_move(
                     }
                 )
 
+    # 4. CONTROLLED HUMAN MISTAKE / BLUNDER.
+    # These choices deliberately use lower MultiPV lines only when the bot
+    # already has a meaningful cushion. The move stays legal and the remaining
+    # evaluation is kept positive so the bot can still play to a win.
+    if (
+        current_advantage >= 300
+        and random.randint(
+            1,
+            10
+        ) == 1
+    ):
+        mistake_candidates = [
+            candidate
+            for candidate in candidates[
+                2:10
+            ]
+            if (
+                candidate["cp"]
+                <= best_cp - 100
+                and candidate["cp"]
+                >= max(
+                    50,
+                    current_advantage - 350
+                )
+            )
+        ]
+
+        if mistake_candidates:
+            chosen = choose_human_candidate(
+                board,
+                mistake_candidates
+            )
+
+            return (
+                chosen["move"],
+                chosen["info"],
+                {
+                    "rank": chosen["rank"],
+                    "current_cp": current_advantage,
+                    "selected_cp": chosen["cp"],
+                    "reason": (
+                        f"HUMAN MISTAKE "
+                        f"(Engine #{chosen['rank'] + 1}) | "
+                        f"BEST={best_cp / 100:+.2f} "
+                        f"SELECTED={chosen['cp'] / 100:+.2f}"
+                    )
+                }
+            )
+
+    if (
+        current_advantage >= 500
+        and random.randint(
+            1,
+            20
+        ) == 1
+    ):
+        blunder_candidates = [
+            candidate
+            for candidate in candidates[
+                4:15
+            ]
+            if (
+                candidate["cp"]
+                <= best_cp - 250
+                and candidate["cp"]
+                >= max(
+                    100,
+                    current_advantage - 550
+                )
+            )
+        ]
+
+        if blunder_candidates:
+            chosen = choose_human_candidate(
+                board,
+                blunder_candidates
+            )
+
+            return (
+                chosen["move"],
+                chosen["info"],
+                {
+                    "rank": chosen["rank"],
+                    "current_cp": current_advantage,
+                    "selected_cp": chosen["cp"],
+                    "reason": (
+                        f"HUMAN BLUNDER "
+                        f"(Engine #{chosen['rank'] + 1}) | "
+                        f"BEST={best_cp / 100:+.2f} "
+                        f"SELECTED={chosen['cp'] / 100:+.2f}"
+                    )
+                }
+            )
+
     # 4. BAKWAS: +5.00 to +8.00.
     if (
         HUMAN_LIKE_BAKWAS_MIN_ADVANTAGE_CP
@@ -1280,9 +1429,13 @@ def choose_stockfish_move(
                     candidate["cp"]
                     > HUMAN_LIKE_BAKWAS_MIN_RESULT_CP
                     and candidate["cp"]
-                    >= human_safety_floor_cp(
-                        best_cp
+                    >= max(
+                        100,
+                        current_advantage
+                        - 450
                     )
+                    and candidate["cp"]
+                    <= best_cp - 50
                 )
             ]
 
@@ -1335,8 +1488,11 @@ def choose_stockfish_move(
                 candidate["cp"]
                 > HUMAN_LIKE_INACCURACY_MIN_RESULT_CP
                 and candidate["cp"]
-                >= human_safety_floor_cp(
-                    best_cp
+                <= best_cp - 20
+                and candidate["cp"]
+                >= max(
+                    50,
+                    best_cp - 180
                 )
             )
         ]
@@ -1366,9 +1522,31 @@ def choose_stockfish_move(
     # 6. NORMAL HUMAN PLAY.
     # Use a broader safe pool so #4/#5/#6/#7/#8 can appear naturally.
     # Human feature preferences are applied only after the safety floor.
-    human_floor_cp = human_safety_floor_cp(
-        best_cp
+    # Normal human play: use a wider evaluation band. The old
+    # safety floor was narrow enough to leave only #1/#2 in many positions.
+    normal_variation_drop_cp = min(
+        350,
+        max(
+            100,
+            int(
+                max(
+                    150,
+                    abs(best_cp)
+                ) * 0.35
+            )
+        )
     )
+
+    human_floor_cp = (
+        best_cp
+        - normal_variation_drop_cp
+    )
+
+    if best_cp >= 0:
+        human_floor_cp = max(
+            5,
+            human_floor_cp
+        )
 
     if opponent_sample_count < OPPONENT_MIN_SAMPLES:
         normal_rank_cap = 7
@@ -1381,30 +1559,14 @@ def choose_stockfish_move(
     else:
         normal_rank_cap = 3
 
-    growth_safe_candidates = [
+    human_safe_candidates = [
         candidate
         for candidate in candidates
         if (
             candidate["rank"] <= normal_rank_cap
-            and candidate["cp"]
-            >= (
-                current_advantage
-                + HUMAN_ADVANTAGE_GROWTH_TRIGGER_CP
-            )
+            and candidate["cp"] >= human_floor_cp
         )
     ]
-
-    if growth_safe_candidates:
-        human_safe_candidates = growth_safe_candidates
-    else:
-        human_safe_candidates = [
-            candidate
-            for candidate in candidates
-            if (
-                candidate["rank"] <= normal_rank_cap
-                and candidate["cp"] >= human_floor_cp
-            )
-        ]
 
     if not human_safe_candidates:
         human_safe_candidates = [
