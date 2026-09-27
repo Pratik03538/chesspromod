@@ -1339,8 +1339,8 @@ def choose_stockfish_move(
         # helper already avoids repeated #1/#2 when lower choices exist and
         # strongly prefers captures/checks/promotions.
         progress_floor_cp = max(
-            200,
-            current_advantage - 160
+            250,
+            current_advantage - 300
         )
 
         progress_candidates = [
