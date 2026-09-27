@@ -1350,9 +1350,10 @@ def choose_stockfish_move(
     choose_stockfish_move._winning_lock = False
 
     # 1. GM ACTIVE WINNING PLAY.
-    # Clear advantage must lead to practical progress, not repeated holding.
-    # Keep the existing human-like selector so lower safe ranks can be used
-    # instead of forcing #1/#2 over and over.
+    # Once the bot is +4.00 or better, stop making deliberate mistakes.
+    # Human-like variation is still allowed, but every selected move must
+    # remain close to the current advantage. This prevents intentionally
+    # giving away pieces just to create a "human" mistake.
     if current_advantage >= HUMAN_ADVANTAGE_START_CP:
         recent_ranks = list(
             getattr(
@@ -1372,8 +1373,18 @@ def choose_stockfish_move(
             )
         )
 
-        # Occasional deeper "great move". Skip a same-position #1 repeat when
-        # the previous move was already a top-two choice.
+        # Above +4.00, use a tight stability floor. A candidate may still be
+        # lower MultiPV, but it must keep the current winning advantage within
+        # 0.80 pawn. This is the main protection against deliberate piece
+        # giveaways while preserving human-like rank variation.
+        favorable_floor_active = True
+        favorable_eval_floor_cp = max(
+            300,
+            current_advantage - 80
+        )
+
+        # Allow an occasional deeper best-line move, but never #1 immediately
+        # after another top-two move when a safe lower-ranked choice exists.
         if (
             engine is not None
             and random.randint(
@@ -1407,16 +1418,11 @@ def choose_stockfish_move(
                 else None
             )
 
-            deep_floor_cp = max(
-                200,
-                current_advantage - 80
-            )
-
             if (
                 deep_move is not None
                 and deep_move in board.legal_moves
                 and deep_cp is not None
-                and deep_cp >= deep_floor_cp
+                and deep_cp >= favorable_eval_floor_cp
                 and not (
                     previous_rank in (0, 1)
                     and deep_move == best["move"]
@@ -1443,147 +1449,15 @@ def choose_stockfish_move(
                     }
                 )
 
-        # Realistic imperfection, but with a recoverable winning cushion.
-        if random.randint(
-            1,
-            12
-        ) == 1:
-            mistake_candidates = [
-                candidate
-                for candidate in candidates[
-                    2:10
-                ]
-                if (
-                    candidate["cp"]
-                    <= best_cp - 60
-                    and candidate["cp"]
-                    >= max(
-                        200,
-                        current_advantage - 180
-                    )
-                )
-            ]
-
-            if mistake_candidates:
-                chosen = choose_human_candidate(
-                    board,
-                    mistake_candidates
-                )
-
-                return (
-                    chosen["move"],
-                    chosen["info"],
-                    {
-                        "rank": chosen["rank"],
-                        "current_cp": current_advantage,
-                        "selected_cp": chosen["cp"],
-                        "reason": (
-                            f"HUMAN MISTAKE "
-                            f"(Engine #{chosen['rank'] + 1}) | "
-                            f"BEST={best_cp / 100:+.2f} "
-                            f"SELECTED={chosen['cp'] / 100:+.2f}"
-                        )
-                    }
-                )
-
-        if (
-            current_advantage >= 700
-            and random.randint(
-                1,
-                30
-            ) == 1
-        ):
-            blunder_candidates = [
-                candidate
-                for candidate in candidates[
-                    4:15
-                ]
-                if (
-                    candidate["cp"]
-                    <= best_cp - 120
-                    and candidate["cp"]
-                    >= max(
-                        300,
-                        current_advantage - 280
-                    )
-                )
-            ]
-
-            if blunder_candidates:
-                chosen = choose_human_candidate(
-                    board,
-                    blunder_candidates
-                )
-
-                return (
-                    chosen["move"],
-                    chosen["info"],
-                    {
-                        "rank": chosen["rank"],
-                        "current_cp": current_advantage,
-                        "selected_cp": chosen["cp"],
-                        "reason": (
-                            f"HUMAN BLUNDER "
-                            f"(Engine #{chosen['rank'] + 1}) | "
-                            f"BEST={best_cp / 100:+.2f} "
-                            f"SELECTED={chosen['cp'] / 100:+.2f}"
-                        )
-                    }
-                )
-
-        # Inaccuracy remains part of the human-like profile even while winning.
-        if random.randint(
-            1,
-            7
-        ) == 1:
-            inaccuracy_candidates = [
-                candidate
-                for candidate in candidates[
-                    3:8
-                ]
-                if (
-                    candidate["cp"]
-                    <= best_cp - 20
-                    and candidate["cp"]
-                    >= max(
-                        250,
-                        current_advantage - 120
-                    )
-                )
-            ]
-
-            if inaccuracy_candidates:
-                chosen = choose_human_candidate(
-                    board,
-                    inaccuracy_candidates
-                )
-
-                return (
-                    chosen["move"],
-                    chosen["info"],
-                    {
-                        "rank": chosen["rank"],
-                        "current_cp": current_advantage,
-                        "selected_cp": chosen["cp"],
-                        "reason": (
-                            f"INACCURACY "
-                            f"(Engine #{chosen['rank'] + 1}) | "
-                            f"BEST={best_cp / 100:+.2f} "
-                            f"SELECTED={chosen['cp'] / 100:+.2f}"
-                        )
-                    }
-                )
-
-        # Active conversion: pick from a broad, safe winning pool. Passing the
-        # whole pool into choose_human_candidate is essential because that
-        # helper already avoids repeated #1/#2 when lower choices exist and
-        # strongly prefers captures/checks/promotions.
-        progress_floor_cp = max(
-            250,
-            current_advantage - 300
-        )
-
-        progress_candidates = [
+        # IMPORTANT: no HUMAN MISTAKE / BLUNDER / INACCURACY branch at +4.00
+        # or above. Those branches were the source of large, artificial
+        # evaluation drops after the bot was already winning.
+        #
+        # Human-like variation above +4 is now entirely rank-based inside the
+        # tight safety floor. Prefer #3-#8 for stability; use #1/#2 only
+        # occasionally, with the chance increasing as the advantage becomes
+        # genuinely large.
+        stable_candidates = [
             candidate
             for candidate in candidates
             if (
@@ -1591,39 +1465,83 @@ def choose_stockfish_move(
                     7,
                     len(candidates) - 1
                 )
-                and candidate["cp"] >= progress_floor_cp
+                and candidate["cp"] >= favorable_eval_floor_cp
             )
         ]
 
-        if progress_candidates:
+        lower_stable_candidates = [
+            candidate
+            for candidate in stable_candidates
+            if candidate["rank"] >= 2
+        ]
+
+        top_two_stable_candidates = [
+            candidate
+            for candidate in stable_candidates
+            if candidate["rank"] <= 1
+        ]
+
+        if lower_stable_candidates:
+            if current_advantage >= 1000:
+                top_choice_chance = 0.50
+            elif current_advantage >= 800:
+                top_choice_chance = 0.40
+            elif current_advantage >= 600:
+                top_choice_chance = 0.30
+            elif current_advantage >= 500:
+                top_choice_chance = 0.20
+            else:
+                top_choice_chance = 0.10
+
+            # Never take #1/#2 back-to-back when a safe #3-#8 move exists.
+            if previous_rank in (0, 1):
+                selected_pool = lower_stable_candidates
+            elif (
+                top_two_stable_candidates
+                and random.random() < top_choice_chance
+            ):
+                selected_pool = top_two_stable_candidates
+            else:
+                selected_pool = lower_stable_candidates
+
             chosen = choose_human_candidate(
                 board,
-                progress_candidates
+                selected_pool
             )
+        elif top_two_stable_candidates:
+            # If no safe #3-#8 move exists, #1/#2 is the only safe choice.
+            chosen = choose_human_candidate(
+                board,
+                top_two_stable_candidates
+            )
+        else:
+            # Emergency safety fallback: use the engine best rather than
+            # selecting a move outside the +4 stability floor.
+            chosen = best
 
-            capture_note = (
-                " | HUMAN CAPTURE"
-                if board.is_capture(chosen["move"])
-                else ""
-            )
+        capture_note = (
+            " | HUMAN CAPTURE"
+            if board.is_capture(chosen["move"])
+            else ""
+        )
 
-            return (
-                chosen["move"],
-                chosen["info"],
-                {
-                    "rank": chosen["rank"],
-                    "current_cp": current_advantage,
-                    "selected_cp": chosen["cp"],
-                    "reason": (
-                        f"GM ACTIVE CONVERSION "
-                        f"(#{chosen['rank'] + 1}) | "
-                        f"FLOOR={progress_floor_cp / 100:+.2f} "
-                        f"BEST={best_cp / 100:+.2f} "
-                        f"SELECTED={chosen['cp'] / 100:+.2f}"
-                        f"{capture_note}"
-                    )
-                }
-            )
+        return (
+            chosen["move"],
+            chosen["info"],
+            {
+                "rank": chosen["rank"],
+                "current_cp": current_advantage,
+                "selected_cp": chosen["cp"],
+                "reason": (
+                    f"GM STABLE CONVERSION "
+                    f"(#{chosen['rank'] + 1}) | "
+                    f"FLOOR={favorable_eval_floor_cp / 100:+.2f} "
+                    f"BEST={best_cp / 100:+.2f} "
+                    f"SELECTED={chosen['cp'] / 100:+.2f}"
+                    f"{capture_note}"
+                )
+            }
+        )
 
     # 2. LOW-ADVANTAGE HUMAN PLAY.
     # Replace the old top-3 Pull-Up cage with a safe human pool. The pool
