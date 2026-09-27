@@ -91,6 +91,10 @@ def draw_overlay(
                         True
                     )
                 )
+
+                if state["new_game"]:
+                    state["rematch"] = False
+
                 return
 
             rematch_rect = state.get(
@@ -108,6 +112,9 @@ def draw_overlay(
                         False
                     )
                 )
+
+                if state["rematch"]:
+                    state["new_game"] = False
 
         try:
             cv2.namedWindow(
