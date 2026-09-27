@@ -3200,7 +3200,13 @@ def main():
                                 )
 
                                 # This detected move was not physically verified,
-                                # so undo only the provisional accuracy sample.
+                                # so undo only the provisional accuracy samples.
+                                if (
+                                    opponent_engine_top2
+                                    and opponent_engine_match_history
+                                ):
+                                    opponent_engine_match_history.pop()
+
                                 if expected_human_uci:
                                     if opponent_match_history:
                                         opponent_match_history.pop()
