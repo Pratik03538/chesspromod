@@ -3758,8 +3758,15 @@ def main():
                                         cached_board_coords,
                                         visual_black_perspective,
                                         pending_bot_move=best_move,
-                                        first_frame=None,
-                                        legal_moves=list(board.legal_moves)
+                                        first_frame=(
+                                            baseline_frame
+                                            if baseline_frame is not None
+                                            else None
+                                        ),
+                                        legal_moves=list(board.legal_moves),
+                                        require_transition_from_first_frame=(
+                                            baseline_frame is not None
+                                        )
                                     )
 
                                     if (
@@ -3818,9 +3825,13 @@ def main():
                                 before_frame = (
                                     pending_unchanged_frame
                                     if pending_unchanged_frame is not None
-                                    else capture_screen(
-                                        sct,
-                                        scrcpy_hwnd
+                                    else (
+                                        baseline_frame
+                                        if baseline_frame is not None
+                                        else capture_screen(
+                                            sct,
+                                            scrcpy_hwnd
+                                        )
                                     )
                                 )
 
@@ -4013,7 +4024,8 @@ def main():
                                             visual_black_perspective,
                                             pending_bot_move=best_move,
                                             first_frame=before_frame,
-                                            legal_moves=list(board.legal_moves)
+                                            legal_moves=list(board.legal_moves),
+                                            require_transition_from_first_frame=True
                                         )
 
                                         if (
@@ -4258,8 +4270,9 @@ def main():
                                                 cached_board_coords,
                                                 visual_black_perspective,
                                                 pending_bot_move=best_move,
-                                                first_frame=None,
-                                                legal_moves=list(board.legal_moves)
+                                                first_frame=before_frame,
+                                                legal_moves=list(board.legal_moves),
+                                                require_transition_from_first_frame=True
                                             )
                                             next_main_turn_rescan = (
                                                 now_rescan + TURN_RESCAN_INTERVAL
