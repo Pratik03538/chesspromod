@@ -1852,7 +1852,7 @@ def main():
                                 INITIAL_FEN
                             )
 
-                                fresh_black_perspective = (
+                            fresh_black_perspective = (
                                 detect_board_orientation(
                                     fresh_grid,
                                     fresh_board
