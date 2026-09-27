@@ -465,6 +465,19 @@ def periodic_full_board_catchup_scan(
                     + raw_mismatch(observed_b, expected_after),
             })
 
+    # Stockfish turn with a frozen move: first test whether the physical
+    # board is actually still unchanged. A tiny vision fluctuation (without
+    # any touch/move) must not block the pending Stockfish click forever.
+    if pending_bot_move is not None:
+        candidates.append({
+            "kind": "INTERNAL_UNCHANGED",
+            "bot_move": None,
+            "human_move": None,
+            "expected_board": board,
+            "raw_pair": raw_mismatch(observed_a, board)
+                + raw_mismatch(observed_b, board),
+        })
+
     # Stockfish turn with a frozen move: test bot-only and bot+human.
     if pending_bot_move is not None:
         if not isinstance(pending_bot_move, chess.Move):
