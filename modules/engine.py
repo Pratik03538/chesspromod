@@ -1109,6 +1109,238 @@ def choose_stockfish_move(
                     current_eval
                 )
 
+    # Persistent winning lock.
+    # Once the evaluation has shown a clear advantage, do not let the
+    # human-like randomness give the advantage away again. The lock stays
+    # active through temporary evaluation dips and is released only after
+    # the position has genuinely fallen back into danger.
+    peak_advantage_cp = int(
+        getattr(
+            choose_stockfish_move,
+            "_peak_advantage_cp",
+            current_advantage
+        )
+    )
+
+    if current_advantage > peak_advantage_cp:
+        peak_advantage_cp = current_advantage
+
+    choose_stockfish_move._peak_advantage_cp = peak_advantage_cp
+
+    winning_lock = bool(
+        getattr(
+            choose_stockfish_move,
+            "_winning_lock",
+            False
+        )
+    )
+
+    if current_advantage >= WINNING_LOCK_START_CP:
+        winning_lock = True
+
+    if (
+        winning_lock
+        and current_advantage <= WINNING_LOCK_EXIT_CP
+    ):
+        winning_lock = False
+        peak_advantage_cp = current_advantage
+        choose_stockfish_move._peak_advantage_cp = (
+            peak_advantage_cp
+        )
+
+    choose_stockfish_move._winning_lock = winning_lock
+
+    if winning_lock:
+        # ------------------------------------------------------------
+        # PHASE A: KILL MODE
+        # At a large advantage, stop all deliberate inaccuracies and
+        # use the engine's strongest continuation. This is the critical
+        # anti-collapse rule: a +5 / +6 position cannot be followed by
+        # a random MultiPV #5-#8 move that throws the advantage away.
+        # ------------------------------------------------------------
+        if (
+            current_advantage >= WINNING_KILL_START_CP
+            or peak_advantage_cp >= WINNING_KILL_START_CP
+        ):
+            selected = best
+
+            choose_stockfish_move._last_human_rank = (
+                selected["rank"]
+            )
+            choose_stockfish_move._recent_human_ranks = (
+                list(
+                    getattr(
+                        choose_stockfish_move,
+                        "_recent_human_ranks",
+                        []
+                    )
+                )
+                + [selected["rank"]]
+            )[-3:]
+            choose_stockfish_move._winning_conversion_cycle = 0
+
+            return (
+                selected["move"],
+                selected["info"],
+                {
+                    "rank": selected["rank"],
+                    "current_cp": current_advantage,
+                    "selected_cp": selected["cp"],
+                    "reason": (
+                        "WINNING KILL MODE | "
+                        f"CURRENT={current_advantage / 100:+.2f} "
+                        f"PEAK={peak_advantage_cp / 100:+.2f} "
+                        f"BEST={best_cp / 100:+.2f}"
+                    )
+                }
+            )
+
+        # ------------------------------------------------------------
+        # PHASE B: WINNING SQUEEZE
+        # Keep some human-like variation, but only inside a very small
+        # engine-quality window. Prefer captures/checks/promotions among
+        # those near-best choices. No mistake/blunder/BAKWAS branch is
+        # allowed to run while this lock is active.
+        # ------------------------------------------------------------
+        squeeze_candidates = [
+            candidate
+            for candidate in candidates
+            if (
+                candidate["rank"] <= 2
+                and candidate["cp"] >= (
+                    best_cp
+                    - WINNING_SQUEEZE_GAP_CP
+                )
+            )
+        ]
+
+        if squeeze_candidates:
+            tactical_candidates = []
+
+            for candidate in squeeze_candidates:
+                move = candidate["move"]
+                tactical_score = 0.0
+
+                if board.is_capture(move):
+                    captured_piece = board.piece_at(
+                        move.to_square
+                    )
+
+                    if (
+                        captured_piece is None
+                        and board.is_en_passant(move)
+                    ):
+                        tactical_score += 3.0
+                    elif captured_piece is not None:
+                        tactical_score += (
+                            3.0
+                            + min(
+                                material_value(
+                                    captured_piece.piece_type
+                                ),
+                                900
+                            ) / 900.0 * 2.0
+                        )
+
+                if board.gives_check(move):
+                    tactical_score += 2.5
+
+                if move.promotion is not None:
+                    tactical_score += 4.0
+
+                tactical_candidates.append(
+                    (
+                        candidate,
+                        tactical_score
+                    )
+                )
+
+            max_tactical = max(
+                score
+                for _, score in tactical_candidates
+            )
+
+            if max_tactical > 0:
+                tactical_pool = [
+                    candidate
+                    for candidate, score
+                    in tactical_candidates
+                    if score == max_tactical
+                ]
+            else:
+                tactical_pool = squeeze_candidates
+
+            selected = random.choice(
+                tactical_pool
+            )
+
+            choose_stockfish_move._last_human_rank = (
+                selected["rank"]
+            )
+            choose_stockfish_move._recent_human_ranks = (
+                list(
+                    getattr(
+                        choose_stockfish_move,
+                        "_recent_human_ranks",
+                        []
+                    )
+                )
+                + [selected["rank"]]
+            )[-3:]
+            choose_stockfish_move._winning_conversion_cycle = 0
+
+            return (
+                selected["move"],
+                selected["info"],
+                {
+                    "rank": selected["rank"],
+                    "current_cp": current_advantage,
+                    "selected_cp": selected["cp"],
+                    "reason": (
+                        "WINNING SQUEEZE | "
+                        f"CURRENT={current_advantage / 100:+.2f} "
+                        f"PEAK={peak_advantage_cp / 100:+.2f} "
+                        f"BEST={best_cp / 100:+.2f} "
+                        f"SELECTED={selected['cp'] / 100:+.2f}"
+                    )
+                }
+            )
+
+        # If the position has no near-best #1/#2 alternative, never fall
+        # through into the weaker human-like mistake branches.
+        selected = best
+
+        choose_stockfish_move._last_human_rank = (
+            selected["rank"]
+        )
+        choose_stockfish_move._recent_human_ranks = (
+            list(
+                getattr(
+                    choose_stockfish_move,
+                    "_recent_human_ranks",
+                    []
+                )
+            )
+            + [selected["rank"]]
+        )[-3:]
+        choose_stockfish_move._winning_conversion_cycle = 0
+
+        return (
+            selected["move"],
+            selected["info"],
+            {
+                "rank": selected["rank"],
+                "current_cp": current_advantage,
+                "selected_cp": selected["cp"],
+                "reason": (
+                    "WINNING BEST FALLBACK | "
+                    f"CURRENT={current_advantage / 100:+.2f} "
+                    f"PEAK={peak_advantage_cp / 100:+.2f} "
+                    f"BEST={best_cp / 100:+.2f}"
+                )
+            }
+        )
+
     # 1. GM ACTIVE WINNING PLAY.
     # Clear advantage must lead to practical progress, not repeated holding.
     # Keep the existing human-like selector so lower safe ranks can be used
