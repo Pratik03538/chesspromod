@@ -4184,18 +4184,28 @@ def main():
                                     )
 
                                     try:
-                                        bot_best_cp = int(
-                                            selection_meta.get(
-                                                "current_cp",
-                                                selection_meta.get("selected_cp", 0)
-                                            )
-                                        )
                                         bot_selected_cp = int(
                                             selection_meta.get(
                                                 "selected_cp",
-                                                bot_best_cp
+                                                0
                                             )
                                         )
+
+                                        bot_best_cp = bot_selected_cp
+
+                                        if result is not None:
+                                            bot_score_obj = result.get(
+                                                "score"
+                                            )
+
+                                            if bot_score_obj is not None:
+                                                bot_best_cp = int(
+                                                    score_to_cp(
+                                                        bot_score_obj.pov(
+                                                            before_board.turn
+                                                        )
+                                                    )
+                                                )
 
                                         bot_loss_cp = max(
                                             0,
