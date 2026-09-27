@@ -729,6 +729,8 @@ def main():
         draw_overlay._game_started_at = current_game_started_at
 
     def set_bot_ui_state(label):
+        nonlocal display_frame
+
         now_state = time.perf_counter()
         current_state = getattr(
             draw_overlay,
