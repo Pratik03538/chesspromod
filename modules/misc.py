@@ -1598,6 +1598,51 @@ def main():
 
                             if (
                                 new_match_button_stable >= 2
+                                and not (
+                                    bool(
+                                        ui_state.get(
+                                            "new_game",
+                                            True
+                                        )
+                                    )
+                                    or bool(
+                                        ui_state.get(
+                                            "rematch",
+                                            False
+                                        )
+                                    )
+                                )
+                            ):
+                                # Automation is OFF. Do not click, but switch
+                                # to the same fresh-match watcher used after
+                                # an automatic click. A manual New/Rematch
+                                # action can then be detected when the real
+                                # board appears.
+                                awaiting_new_match = True
+                                game_ready = False
+                                cached_board_grid = None
+                                baseline_frame = None
+                                screen_interrupted = False
+                                screen_interrupt_bad_samples = 0
+                                screen_interrupt_clear_samples = 0
+                                screen_interrupt_fraction = 0.0
+
+                                draw_overlay._rank_history.clear()
+                                draw_overlay._move_history_text = "-"
+
+                                new_match_button_stable = 0
+                                new_match_button_center = None
+                                new_match_click_attempts = 0
+                                next_new_match_scan = (
+                                    time.perf_counter()
+                                    + 0.25
+                                )
+                                new_match_start_stable = 0
+                                new_match_start_key = None
+                                new_match_scan_ms = 0.0
+
+                            elif (
+                                new_match_button_stable >= 2
                                 and (
                                     bool(
                                         ui_state.get(
@@ -1789,55 +1834,50 @@ def main():
 
                         new_match_scan_ms = fresh_scan_ms
 
-                        fresh_board = chess.Board(
-                            INITIAL_FEN
+                        # Ignore blank/searching/matchmaking screens.
+                        # Orientation is calculated only after real pieces
+                        # are visible.
+                        detected_piece_count = sum(
+                            1
+                            for row in fresh_grid
+                            for symbol in row
+                            if symbol is not None
                         )
 
-                        fresh_black_perspective = (
-                            detect_board_orientation(
-                                fresh_grid,
-                                fresh_board
-                            )
-                        )
-
-                        fresh_stockfish_color = (
-                            detect_bottom_stockfish_color(
-                                fresh_black_perspective
-                            )
-                        )
-
-                        fresh_human_color = (
-                            chess.BLACK
-                            if fresh_stockfish_color == chess.WHITE
-                            else chess.WHITE
-                        )
-
-                        fresh_start_verified = False
-                        fresh_first_move = None
-                        fresh_start_key = None
-
-                        # Exact untouched starting position.
-                        fresh_initial_ok, _ = (
-                            full_board_state_confirmed(
-                                frame,
-                                fresh_board,
-                                cached_board_coords,
-                                fresh_black_perspective
-                            )
-                        )
-
-                        if fresh_initial_ok:
-                            fresh_start_verified = True
-                            fresh_start_key = (
-                                f"{int(fresh_black_perspective)}:START"
+                        if detected_piece_count < 20:
+                            new_match_start_stable = 0
+                            new_match_start_key = None
+                        else:
+                            fresh_board = chess.Board(
+                                INITIAL_FEN
                             )
 
-                        # Human-White may already have made the first move
-                        # before this polling frame arrived. Reuse the existing
-                        # first-move detector and its strict physical check.
-                        elif fresh_human_color == chess.WHITE:
-                            fresh_first_move = (
-                                detect_existing_white_first_move(
+                                fresh_black_perspective = (
+                                detect_board_orientation(
+                                    fresh_grid,
+                                    fresh_board
+                                )
+                            )
+
+                            fresh_stockfish_color = (
+                                detect_bottom_stockfish_color(
+                                    fresh_black_perspective
+                                )
+                            )
+
+                            fresh_human_color = (
+                                chess.BLACK
+                                if fresh_stockfish_color == chess.WHITE
+                                else chess.WHITE
+                            )
+
+                            fresh_start_verified = False
+                            fresh_first_move = None
+                            fresh_start_key = None
+
+                            # Exact untouched starting position.
+                            fresh_initial_ok, _ = (
+                                full_board_state_confirmed(
                                     frame,
                                     fresh_board,
                                     cached_board_coords,
@@ -1845,113 +1885,132 @@ def main():
                                 )
                             )
 
-                            if fresh_first_move is not None:
+                            if fresh_initial_ok:
                                 fresh_start_verified = True
                                 fresh_start_key = (
-                                    f"{int(fresh_black_perspective)}:"
-                                    f"{fresh_first_move.uci()}"
+                                    f"{int(fresh_black_perspective)}:START"
                                 )
 
-                        if fresh_start_verified:
-                            if fresh_start_key == new_match_start_key:
-                                new_match_start_stable += 1
-                            else:
-                                new_match_start_key = fresh_start_key
-                                new_match_start_stable = 1
-
-                            if new_match_start_stable >= 2:
-                                board = fresh_board
-
-                                visual_black_perspective = (
-                                    fresh_black_perspective
+                            # Human-White may already have made the first move
+                            # before this polling frame arrived. Reuse the existing
+                            # first-move detector and its strict physical check.
+                            elif fresh_human_color == chess.WHITE:
+                                fresh_first_move = (
+                                    detect_existing_white_first_move(
+                                        frame,
+                                        fresh_board,
+                                        cached_board_coords,
+                                        fresh_black_perspective
+                                    )
                                 )
-
-                                stockfish_color = (
-                                    fresh_stockfish_color
-                                )
-
-                                human_color = (
-                                    fresh_human_color
-                                )
-
-                                cached_board_grid = fresh_grid
-                                baseline_frame = frame
 
                                 if fresh_first_move is not None:
-                                    board.push(
-                                        fresh_first_move
+                                    fresh_start_verified = True
+                                    fresh_start_key = (
+                                        f"{int(fresh_black_perspective)}:"
+                                        f"{fresh_first_move.uci()}"
                                     )
 
-                                draw_overlay._move_history_text = format_move_history(
-                                    board,
-                                    draw_overlay._rank_history
-                                )
+                            if fresh_start_verified:
+                                if fresh_start_key == new_match_start_key:
+                                    new_match_start_stable += 1
+                                else:
+                                    new_match_start_key = fresh_start_key
+                                    new_match_start_stable = 1
 
-                                awaiting_new_match = False
-                                game_ready = True
+                                if new_match_start_stable >= 2:
+                                    board = fresh_board
 
-                                out_of_book = False
-                                analysis_state = None
-                                opponent_match_history.clear()
-                                next_human_best_uci = None
-                                opponent_pressure = False
-                                last_bot_position_key = None
-                                pending_bot_moves.clear()
-                                pending_recovered_human = None
+                                    visual_black_perspective = (
+                                        fresh_black_perspective
+                                    )
 
-                                stockfish_moves_since_buffer = 0
-                                next_buffer_after = random.randint(
-                                    RANDOM_BUFFER_MOVE_MIN,
-                                    RANDOM_BUFFER_MOVE_MAX
-                                )
+                                    stockfish_color = (
+                                        fresh_stockfish_color
+                                    )
 
-                                _advantage_progress_target_cp = None
-                                _advantage_progress_hold_moves = 0
-                                _advantage_progress_hold_limit = random.randint(
-                                    HUMAN_ADVANTAGE_HOLD_MIN_MOVES,
-                                    HUMAN_ADVANTAGE_HOLD_MAX_MOVES
-                                )
-                                _advantage_progress_side = None
+                                    human_color = (
+                                        fresh_human_color
+                                    )
 
-                                next_main_turn_rescan = (
-                                    time.perf_counter()
-                                    + TURN_RESCAN_INTERVAL
-                                )
+                                    cached_board_grid = fresh_grid
+                                    baseline_frame = frame
 
-                                screen_interrupted = False
-                                screen_interrupt_bad_samples = 0
-                                screen_interrupt_clear_samples = 0
-                                screen_interrupt_fraction = 0.0
+                                    if fresh_first_move is not None:
+                                        board.push(
+                                            fresh_first_move
+                                        )
 
+                                    draw_overlay._move_history_text = format_move_history(
+                                        board,
+                                        draw_overlay._rank_history
+                                    )
+
+                                    awaiting_new_match = False
+                                    game_ready = True
+
+                                    out_of_book = False
+                                    analysis_state = None
+                                    opponent_match_history.clear()
+                                    next_human_best_uci = None
+                                    opponent_pressure = False
+                                    last_bot_position_key = None
+                                    pending_bot_moves.clear()
+                                    pending_recovered_human = None
+
+                                    stockfish_moves_since_buffer = 0
+                                    next_buffer_after = random.randint(
+                                        RANDOM_BUFFER_MOVE_MIN,
+                                        RANDOM_BUFFER_MOVE_MAX
+                                    )
+
+                                    _advantage_progress_target_cp = None
+                                    _advantage_progress_hold_moves = 0
+                                    _advantage_progress_hold_limit = random.randint(
+                                        HUMAN_ADVANTAGE_HOLD_MIN_MOVES,
+                                        HUMAN_ADVANTAGE_HOLD_MAX_MOVES
+                                    )
+                                    _advantage_progress_side = None
+
+                                    next_main_turn_rescan = (
+                                        time.perf_counter()
+                                        + TURN_RESCAN_INTERVAL
+                                    )
+
+                                    screen_interrupted = False
+                                    screen_interrupt_bad_samples = 0
+                                    screen_interrupt_clear_samples = 0
+                                    screen_interrupt_fraction = 0.0
+
+                                    new_match_start_stable = 0
+                                    new_match_start_key = None
+
+                                    print(
+                                        "[MATCH] NEW GAME READY | "
+                                        f"Stockfish="
+                                        f"{'WHITE' if stockfish_color == chess.WHITE else 'BLACK'} "
+                                        f"| Human="
+                                        f"{'WHITE' if human_color == chess.WHITE else 'BLACK'}"
+                                    )
+
+                                    if fresh_first_move is not None:
+                                        print(
+                                            "[MATCH] White-human first move already present | "
+                                            f"{fresh_first_move.uci()} | internal board synced"
+                                        )
+                                else:
+                                    progress(
+                                        "MATCH",
+                                        (
+                                            "new board candidate stable "
+                                            f"{new_match_start_stable}/2"
+                                        ),
+                                        key="new_match_stable",
+                                        force=True
+                                    )
+                            else:
                                 new_match_start_stable = 0
                                 new_match_start_key = None
-
-                                print(
-                                    "[MATCH] NEW GAME READY | "
-                                    f"Stockfish="
-                                    f"{'WHITE' if stockfish_color == chess.WHITE else 'BLACK'} "
-                                    f"| Human="
-                                    f"{'WHITE' if human_color == chess.WHITE else 'BLACK'}"
-                                )
-
-                                if fresh_first_move is not None:
-                                    print(
-                                        "[MATCH] White-human first move already present | "
-                                        f"{fresh_first_move.uci()} | internal board synced"
-                                    )
-                            else:
-                                progress(
-                                    "MATCH",
-                                    (
-                                        "new board candidate stable "
-                                        f"{new_match_start_stable}/2"
-                                    ),
-                                    key="new_match_stable",
-                                    force=True
-                                )
-                        else:
-                            new_match_start_stable = 0
-                            new_match_start_key = None
 
                 status = "READY - PRESS R"
 
