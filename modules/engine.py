@@ -1112,11 +1112,10 @@ def choose_stockfish_move(
                 )
 
     # Persistent winning lock.
-    # A clear advantage turns on conversion mode, but conversion mode does
-    # NOT mean "always play #1/#2". Any MultiPV move that keeps the position
-    # winning and improves or at least preserves the current advantage remains
-    # eligible. Lower ranks are welcome when their resulting evaluation is
-    # better than the current position.
+    # Winning mode is a CONVERSION mode, not a "#1/#2 only" mode.
+    # Lower MultiPV ranks remain eligible when they preserve or improve the
+    # advantage. This gives realistic human-like variety without deliberately
+    # throwing away a winning position.
     peak_advantage_cp = int(
         getattr(
             choose_stockfish_move,
@@ -1154,10 +1153,46 @@ def choose_stockfish_move(
     choose_stockfish_move._winning_lock = winning_lock
 
     if winning_lock:
-        # First look for genuinely improving continuations. This is the key
-        # rule: if #3/#4/#5 is better than the current evaluated position,
-        # there is no reason to reject it just because #1 exists.
-        improving_candidates = [
+        recent_ranks = list(
+            getattr(
+                choose_stockfish_move,
+                "_recent_human_ranks",
+                []
+            )
+        )
+
+        previous_rank = (
+            int(recent_ranks[-1])
+            if recent_ranks
+            else getattr(
+                choose_stockfish_move,
+                "_last_human_rank",
+                None
+            )
+        )
+
+        # The stronger the advantage, the more room the human-like selector
+        # gets to use reasonable lower-ranked moves. The floor is still tied
+        # to the current winning evaluation, so the bot cannot intentionally
+        # drop from a winning position to a losing line just for variety.
+        if current_advantage < 500:
+            winning_drop_cp = 80
+        elif current_advantage < 800:
+            winning_drop_cp = 120
+        elif current_advantage < 1200:
+            winning_drop_cp = 160
+        else:
+            winning_drop_cp = 220
+
+        winning_floor_cp = max(
+            150,
+            min(
+                best_cp,
+                current_advantage
+            ) - winning_drop_cp
+        )
+
+        winning_pool = [
             candidate
             for candidate in candidates
             if (
@@ -1165,46 +1200,53 @@ def choose_stockfish_move(
                     7,
                     len(candidates) - 1
                 )
-                and candidate["cp"] >= (
-                    current_advantage + 10
-                )
+                and candidate["cp"] >= winning_floor_cp
             )
         ]
 
-        # If no move is above the separate current-position evaluation, use
-        # a very small preservation band. This avoids throwing away a win
-        # because two short analyses disagree by a few centipawns.
-        preserving_floor_cp = max(
-            250,
-            current_advantage - 60
-        )
-
-        preserving_candidates = [
+        # Prefer moves that actually improve the evaluated position, but do
+        # not require improvement when the position is already winning.
+        improving_pool = [
             candidate
-            for candidate in candidates
+            for candidate in winning_pool
+            if candidate["cp"] >= current_advantage + 10
+        ]
+
+        conversion_pool = (
+            improving_pool
+            if improving_pool
+            else winning_pool
+        )
+
+        # Genuine rank diversity:
+        # after #1/#2, use a lower safe rank whenever one exists.
+        # After two consecutive top-two choices, prefer #3+ when available.
+        diversity_pool = [
+            candidate
+            for candidate in conversion_pool
             if (
-                candidate["rank"] <= min(
-                    7,
-                    len(candidates) - 1
-                )
-                and candidate["cp"] >= preserving_floor_cp
+                candidate["rank"] >= 2
             )
         ]
 
-        conversion_candidates = (
-            improving_candidates
-            if improving_candidates
-            else preserving_candidates
-        )
+        if (
+            previous_rank in (0, 1)
+            and diversity_pool
+        ):
+            conversion_pool = diversity_pool
 
-        if conversion_candidates:
-            # Reuse the existing human selector so rank diversity,
-            # captures, checks, promotions and natural development still
-            # influence the choice. The selector is fed the full safe pool,
-            # not a pre-selected single move, so #3/#4/#5 can actually win.
+        elif (
+            len(recent_ranks) >= 2
+            and recent_ranks[-1] in (0, 1)
+            and recent_ranks[-2] in (0, 1)
+            and diversity_pool
+        ):
+            conversion_pool = diversity_pool
+
+        if conversion_pool:
             selected = choose_human_candidate(
                 board,
-                conversion_candidates
+                conversion_pool
             )
 
             capture_note = (
@@ -1215,8 +1257,8 @@ def choose_stockfish_move(
 
             mode = (
                 "WINNING PROGRESS"
-                if improving_candidates
-                else "WINNING PRESERVE"
+                if improving_pool
+                else "WINNING VARIATION"
             )
 
             choose_stockfish_move._winning_conversion_cycle = 0
@@ -1234,29 +1276,23 @@ def choose_stockfish_move(
                         f"CURRENT={current_advantage / 100:+.2f} "
                         f"PEAK={peak_advantage_cp / 100:+.2f} "
                         f"BEST={best_cp / 100:+.2f} "
+                        f"FLOOR={winning_floor_cp / 100:+.2f} "
                         f"SELECTED={selected['cp'] / 100:+.2f} "
-                        f"POOL={len(conversion_candidates)}"
+                        f"POOL={len(conversion_pool)}"
                         f"{capture_note}"
                     )
                 }
             )
 
-        # Safety fallback: if MultiPV gives no usable winning continuation,
-        # take the engine best move rather than allowing a deliberate mistake.
+        # If no lower-ranked safe move exists, use the engine best. This is
+        # a real position constraint, not a forced rank preference.
         selected = best
 
         choose_stockfish_move._last_human_rank = (
             selected["rank"]
         )
         choose_stockfish_move._recent_human_ranks = (
-            list(
-                getattr(
-                    choose_stockfish_move,
-                    "_recent_human_ranks",
-                    []
-                )
-            )
-            + [selected["rank"]]
+            recent_ranks + [selected["rank"]]
         )[-3:]
         choose_stockfish_move._winning_conversion_cycle = 0
 
@@ -1271,7 +1307,8 @@ def choose_stockfish_move(
                     "WINNING BEST FALLBACK | "
                     f"CURRENT={current_advantage / 100:+.2f} "
                     f"PEAK={peak_advantage_cp / 100:+.2f} "
-                    f"BEST={best_cp / 100:+.2f}"
+                    f"BEST={best_cp / 100:+.2f} "
+                    f"FLOOR={winning_floor_cp / 100:+.2f}"
                 )
             }
         )
