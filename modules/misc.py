@@ -4133,6 +4133,7 @@ def main():
                                         # frozen Stockfish move is being retried. This
                                         # specifically handles: bot move already on
                                         # screen + human reply already on screen.
+                                        retry_frame = None
                                         now_rescan = time.perf_counter()
                                         if now_rescan >= next_main_turn_rescan:
                                             catchup = periodic_full_board_catchup_scan(
@@ -4151,42 +4152,60 @@ def main():
 
                                             if (
                                                 catchup is not None
-                                                and catchup.get("bot_move") == best_move
                                                 and catchup.get("frame") is not None
-                                                and catchup.get("kind") in (
-                                                    "BOT_ONLY",
-                                                    "BOT_PLUS_HUMAN"
-                                                )
                                             ):
                                                 recovery_frame = catchup["frame"]
-                                                recovered_human = catchup.get("human_move")
 
-                                                # The normal verified-Stockfish commit below
-                                                # will push only the pending bot move. If a
-                                                # human reply is already visible too, queue
-                                                # that verified move for the human branch so
-                                                # it is consumed immediately after the bot
-                                                # position is committed.
-                                                if recovered_human is not None:
-                                                    pending_recovered_human = (
-                                                        recovered_human,
-                                                        recovery_frame
-                                                    )
+                                                if catchup.get("kind") == "INTERNAL_UNCHANGED":
+                                                    # The rescan proved that no touch/move
+                                                    # happened and the physical board still
+                                                    # matches the committed internal board.
+                                                    # Refresh the retry baseline and safely
+                                                    # continue to the normal retry click.
+                                                    before_frame = recovery_frame
+                                                    baseline_frame = recovery_frame
+                                                    retry_frame = recovery_frame
                                                     print(
-                                                        "[RECOVERY] Found bot+human already "
-                                                        f"on screen: {best_san} + "
-                                                        f"{board.san(recovered_human) if recovered_human in expected_board_after_move(board, best_move).legal_moves else recovered_human.uci()}"
+                                                        "[RECOVERY] FULL RESCAN | board unchanged | "
+                                                        "refreshing retry baseline; retrying "
+                                                        f"{best_san}"
                                                     )
+                                                elif (
+                                                    catchup.get("bot_move") == best_move
+                                                    and catchup.get("kind") in (
+                                                        "BOT_ONLY",
+                                                        "BOT_PLUS_HUMAN"
+                                                    )
+                                                ):
+                                                    recovered_human = catchup.get("human_move")
 
-                                                verified = True
-                                                after_frame = recovery_frame
-                                                reason = catchup["reason"]
-                                                break
+                                                    # The normal verified-Stockfish commit below
+                                                    # will push only the pending bot move. If a
+                                                    # human reply is already visible too, queue
+                                                    # that verified move for the human branch so
+                                                    # it is consumed immediately after the bot
+                                                    # position is committed.
+                                                    if recovered_human is not None:
+                                                        pending_recovered_human = (
+                                                            recovered_human,
+                                                            recovery_frame
+                                                        )
+                                                        print(
+                                                            "[RECOVERY] Found bot+human already "
+                                                            f"on screen: {best_san} + "
+                                                            f"{board.san(recovered_human) if recovered_human in expected_board_after_move(board, best_move).legal_moves else recovered_human.uci()}"
+                                                        )
 
-                                        retry_frame = capture_screen(
-                                            sct,
-                                            scrcpy_hwnd
-                                        )
+                                                    verified = True
+                                                    after_frame = recovery_frame
+                                                    reason = catchup["reason"]
+                                                    break
+
+                                        if retry_frame is None:
+                                            retry_frame = capture_screen(
+                                                sct,
+                                                scrcpy_hwnd
+                                            )
 
                                         post_ok, post_reason = (
                                             screen_matches_expected_bot_move(
