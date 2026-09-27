@@ -1435,99 +1435,53 @@ def choose_stockfish_move(
             ]
 
             if progress_candidates:
-                weighted = []
+                # Use the complete safe winning pool so the existing
+                # anti-repeat human selector can move beyond #1.
+                progress_rank_candidates = []
 
                 for candidate in progress_candidates:
                     move = candidate["move"]
-                    weight = 1.0
 
-                    if (
+                    is_forcing = (
+                        board.is_capture(move)
+                        or board.gives_check(move)
+                        or move.promotion is not None
+                    )
+
+                    is_growth = (
                         candidate["cp"]
                         >= current_advantage
                         + HUMAN_ADVANTAGE_GROWTH_TRIGGER_CP
-                    ):
-                        weight *= 3.0
-
-                    rank = int(
-                        candidate.get(
-                            "rank",
-                            0
-                        )
                     )
-
-                    if 1 <= rank <= 4:
-                        weight *= 1.10
-
-                    if board.is_capture(move):
-                        captured_piece = board.piece_at(
-                            move.to_square
-                        )
-
-                        if (
-                            captured_piece is None
-                            and board.is_en_passant(move)
-                        ):
-                            captured_value = material_value(
-                                chess.PAWN
-                            )
-                        elif captured_piece is not None:
-                            captured_value = material_value(
-                                captured_piece.piece_type
-                            )
-                        else:
-                            captured_value = 0
-
-                        weight *= (
-                            4.0
-                            + min(
-                                captured_value,
-                                900
-                            ) / 180.0
-                        )
-
-                    if board.gives_check(move):
-                        weight *= 3.0
-
-                    if move.promotion is not None:
-                        weight *= 6.0
 
                     moving_piece = board.piece_at(
                         move.from_square
                     )
 
-                    if moving_piece is not None:
-                        if (
-                            moving_piece.piece_type
-                            == chess.PAWN
-                        ):
-                            weight *= 1.40
-
-                        if (
-                            moving_piece.piece_type
-                            == chess.KING
-                            and len(board.piece_map()) <= 12
-                        ):
-                            weight *= 1.30
-
-                    weighted.append(
-                        (
-                            candidate,
-                            max(
-                                0.05,
-                                weight
-                            )
-                        )
+                    is_pawn_progress = (
+                        moving_piece is not None
+                        and moving_piece.piece_type
+                        == chess.PAWN
                     )
 
-                chosen = random.choices(
-                    [item[0] for item in weighted],
-                    weights=[item[1] for item in weighted],
-                    k=1
-                )[0]
+                    if (
+                        is_forcing
+                        or is_growth
+                        or is_pawn_progress
+                    ):
+                        progress_rank_candidates.append(
+                            candidate
+                        )
+
+                selection_source = (
+                    progress_rank_candidates
+                    if len(progress_rank_candidates) >= 2
+                    else progress_candidates
+                )
 
                 chosen = choose_human_candidate(
                     board,
-                    [chosen]
+                    selection_source
                 )
 
                 capture_note = (
