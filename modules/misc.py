@@ -1709,7 +1709,7 @@ def main():
                     grid_locked = not grid_locked
 
                     if grid_locked:
-                        awaiting_new_match = False
+                        awaiting_new_match = True
                         new_match_button_stable = 0
                         new_match_button_center = None
                         new_match_click_attempts = 0
@@ -1719,53 +1719,76 @@ def main():
 
                         clear_runtime_caches()
 
-                        (
-                            locked_frame,
-                            locked_grid
-                        ) = wait_for_initial_match(
+                        # L must never block on the lobby. Lock the already
+                        # positioned grid immediately and let the normal
+                        # matchmaking watcher wait for the real game board.
+                        locked_frame = capture_screen(
                             sct,
-                            scrcpy_hwnd,
-                            cached_board_coords
+                            scrcpy_hwnd
                         )
 
-                        if (
-                            locked_frame is None
-                            or locked_grid is None
-                        ):
+                        if locked_frame is None:
                             grid_locked = False
                             game_ready = False
 
                             print(
-                                "[ERROR] Could not scan board."
+                                "[ERROR] Could not capture screen."
                             )
 
                         else:
-                            visual_black_perspective = (
-                                detect_board_orientation(
-                                    locked_grid,
-                                    board
-                                )
-                            )
-
-                            stockfish_color = (
-                                detect_bottom_stockfish_color(
-                                    visual_black_perspective
-                                )
-                            )
-
-                            human_color = (
-                                chess.BLACK
-                                if stockfish_color == chess.WHITE
-                                else chess.WHITE
+                            (
+                                locked_grid,
+                                _locked_confidence,
+                                locked_scan_ms
+                            ) = scan_board(
+                                locked_frame,
+                                cached_board_coords
                             )
 
                             cached_board_grid = locked_grid
                             baseline_frame = locked_frame
+                            new_match_scan_ms = locked_scan_ms
 
-                            # R+L is setup only. A visible initial position is
-                            # not enough to declare GAME READY because the site
-                            # can show the board before a new match starts.
-                            awaiting_new_match = True
+                            detected_piece_count = sum(
+                                1
+                                for row in locked_grid
+                                for symbol in row
+                                if symbol is not None
+                            )
+
+                            # If a real board is already visible, orientation
+                            # can be prepared now. GAME READY is still NOT set
+                            # here; the fresh-match watcher decides when a new
+                            # game actually starts.
+                            if detected_piece_count >= 20:
+                                board_for_orientation = chess.Board(
+                                    INITIAL_FEN
+                                )
+
+                                visual_black_perspective = (
+                                    detect_board_orientation(
+                                        locked_grid,
+                                        board_for_orientation
+                                    )
+                                )
+
+                                stockfish_color = (
+                                    detect_bottom_stockfish_color(
+                                        visual_black_perspective
+                                    )
+                                )
+
+                                human_color = (
+                                    chess.BLACK
+                                    if stockfish_color == chess.WHITE
+                                    else chess.WHITE
+                                )
+                            else:
+                                stockfish_color = None
+                                human_color = None
+
+                            # R+L is setup only. A visible initial position
+                            # in the lobby is not enough to declare GAME READY.
                             game_ready = False
                             require_new_match_start_change = True
                             new_match_reference_frame = locked_frame
@@ -1790,7 +1813,6 @@ def main():
 
                             new_match_start_stable = 0
                             new_match_start_key = None
-                            new_match_scan_ms = 0.0
                             next_new_match_scan = (
                                 time.perf_counter()
                                 + 0.10
@@ -1802,43 +1824,16 @@ def main():
                             screen_interrupt_fraction = 0.0
 
                             print(
-                                "[INFO] Bottom side:",
-                                (
-                                    "BLACK"
-                                    if stockfish_color == chess.BLACK
-                                    else "WHITE"
-                                )
-                            )
-
-                            print(
-                                "[INFO] Stockfish:",
-                                (
-                                    "BLACK"
-                                    if stockfish_color == chess.BLACK
-                                    else "WHITE"
-                                )
-                            )
-
-                            print(
-                                "[INFO] Human:",
-                                (
-                                    "BLACK"
-                                    if human_color == chess.BLACK
-                                    else "WHITE"
-                                )
-                            )
-
-                            print(
-                                "[INFO] First move is WHITE."
-                            )
-
-                            print(
-                                "[MATCH] Board setup complete | "
+                                "[MATCH] Board grid LOCKED | "
+                                f"pieces={detected_piece_count} | "
                                 "WAITING FOR NEW GAME"
                             )
 
                     else:
                         game_ready = False
+                        awaiting_new_match = False
+                        require_new_match_start_change = False
+                        new_match_reference_frame = None
                         baseline_frame = None
 
                         clear_runtime_caches()
