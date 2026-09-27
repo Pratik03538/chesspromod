@@ -900,6 +900,59 @@ def choose_stockfish_move(
     best = candidates[0]
     best_cp = best["cp"]
 
+    # A human may choose an inaccurate move, but an immediately available
+    # promotion near the engine best is an obvious board-level action. Do not
+    # let human-like randomization postpone a sound promotion indefinitely.
+    promotion_choices = [
+        candidate
+        for candidate in candidates
+        if (
+            candidate["move"].promotion is not None
+            and candidate["cp"] >= best_cp - 50
+        )
+    ]
+
+    if promotion_choices and not opponent_engine_mode:
+        selected_promotion = min(
+            promotion_choices,
+            key=lambda candidate: candidate["rank"]
+        )
+
+        choose_stockfish_move._last_human_rank = int(
+            selected_promotion["rank"]
+        )
+        choose_stockfish_move._recent_human_ranks = (
+            list(
+                getattr(
+                    choose_stockfish_move,
+                    "_recent_human_ranks",
+                    []
+                )
+            )
+            + [
+                int(
+                    selected_promotion["rank"]
+                )
+            ]
+        )[-3:]
+        choose_stockfish_move._winning_conversion_cycle = 0
+
+        return (
+            selected_promotion["move"],
+            selected_promotion["info"],
+            {
+                "rank": selected_promotion["rank"],
+                "current_cp": best_cp,
+                "selected_cp": selected_promotion["cp"],
+                "reason": (
+                    f"PROMOTION PRIORITY "
+                    f"(Engine #{selected_promotion['rank'] + 1}) | "
+                    f"BEST={best_cp / 100:+.2f} "
+                    f"SELECTED={selected_promotion['cp'] / 100:+.2f}"
+                )
+            }
+        )
+
     profile = adaptive_accuracy_profile(
         opponent_accuracy,
         opponent_sample_count
