@@ -2060,19 +2060,9 @@ def main():
                     and cached_board_coords
                     and not awaiting_new_match
                 ):
-                    # A completed chess game uses the normal result layout.
-                    # Never mistake the lower green Game Review button for
-                    # the New-button target.
-                    if board.is_game_over():
-                        result_button = (
-                            int(frame.shape[1] * 0.735),
-                            int(frame.shape[0] * 0.392)
-                        )
-                        detect_new_game_button._abort_layout = False
-                    else:
-                        result_button = detect_new_game_button(
-                            frame
-                        )
+                    result_button = detect_new_game_button(
+                        frame
+                    )
 
                     if result_button is not None:
                         result_obstruction = 0.0
@@ -2935,17 +2925,6 @@ def main():
                                                 for entry in book_entries
                                             ]
 
-                                            book_rank_correction = bool(
-                                                getattr(
-                                                    draw_overlay,
-                                                    "_ui_state",
-                                                    {}
-                                                ).get(
-                                                    "book_rank_correction",
-                                                    False
-                                                )
-                                            )
-
                                             chosen_book_entry = (
                                                 random.choices(
                                                     book_entries,
@@ -2953,32 +2932,6 @@ def main():
                                                     k=1
                                                 )[0]
                                             )
-
-                                            selected_book_rank = 0
-
-                                            if book_rank_correction:
-                                                ranked_book_entries = sorted(
-                                                    zip(
-                                                        book_entries,
-                                                        book_weights
-                                                    ),
-                                                    key=lambda item: (
-                                                        -item[1],
-                                                        item[0].move.uci()
-                                                    )
-                                                )
-
-                                                for book_rank_index, (
-                                                    ranked_entry,
-                                                    _
-                                                ) in enumerate(
-                                                    ranked_book_entries
-                                                ):
-                                                    if ranked_entry is chosen_book_entry:
-                                                        selected_book_rank = (
-                                                            book_rank_index
-                                                        )
-                                                        break
 
                                             best_move = (
                                                 chosen_book_entry.move
@@ -2996,11 +2949,7 @@ def main():
                                                 best_move
                                             )
                                             selection_meta = {
-                                                "rank": (
-                                                    selected_book_rank
-                                                    if book_rank_correction
-                                                    else 0
-                                                ),
+                                                "rank": 0,
                                                 "current_cp": 0,
                                                 "selected_cp": 0,
                                                 "reason": (
@@ -3031,11 +2980,6 @@ def main():
                                                 f"SELECTED={best_move.uci()} "
                                                 f"{best_san} | "
                                                 "weighted choice"
-                                                + (
-                                                    f" | BOOK-RANK=#{selected_book_rank + 1}"
-                                                    if book_rank_correction
-                                                    else ""
-                                                )
                                             )
 
                                         else:
