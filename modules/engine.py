@@ -1998,3 +1998,4 @@ def choose_stockfish_move(
                 f"{selected['rank'] + 1}"
             )
         }
+    )
