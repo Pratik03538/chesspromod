@@ -213,7 +213,16 @@ def select_promotion_piece(
             promotion_color,
             board_coords,
             black_perspective,
-            allow_fallback=allow_fallback
+            # Do not use the geometric fallback until the promotion menu has
+            # had several real chances to appear. This prevents an early
+            # click on the destination square before Android renders the menu.
+            allow_fallback=(
+                allow_fallback
+                and attempt >= max(
+                    5,
+                    PROMOTION_RETRIES - 2
+                )
+            )
         )
 
         if square is None:
@@ -256,7 +265,7 @@ def select_promotion_piece(
         # normal board.
         promotion_ok = False
         promotion_reason = "promotion state not yet confirmed"
-        promotion_deadline = time.perf_counter() + 0.10
+        promotion_deadline = time.perf_counter() + 0.35
 
         promotion_types = (
             chess.QUEEN,
