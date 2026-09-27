@@ -2773,11 +2773,12 @@ def main():
                                     )
 
                             # Human-White may already have made the first move
-                            # before this polling frame arrived. Reuse the existing
-                            # first-move detector and its strict physical check.
+                            # before this polling frame arrived. Always probe for that
+                            # move before accepting the untouched START position. This
+                            # prevents a just-played first move from being used as the
+                            # waiting baseline and then getting mistaken for "no move".
                             if (
-                                not fresh_start_verified
-                                and fresh_human_color == chess.WHITE
+                                fresh_human_color == chess.WHITE
                             ):
                                 fresh_first_move = (
                                     detect_existing_white_first_move(
@@ -2794,6 +2795,21 @@ def main():
                                         f"{int(fresh_black_perspective)}:"
                                         f"{fresh_first_move.uci()}"
                                     )
+                                elif start_change_ready:
+                                    fresh_initial_ok, _ = (
+                                        full_board_state_confirmed(
+                                            frame,
+                                            fresh_board,
+                                            cached_board_coords,
+                                            fresh_black_perspective
+                                        )
+                                    )
+
+                                    if fresh_initial_ok:
+                                        fresh_start_verified = True
+                                        fresh_start_key = (
+                                            f"{int(fresh_black_perspective)}:START"
+                                        )
 
                             if fresh_start_verified:
                                 if fresh_start_key == new_match_start_key:
@@ -2991,17 +3007,92 @@ def main():
                                 f"[RECOVERY] Consuming already-verified human move: {move.uci()}"
                             )
                         else:
-                            (
-                                move,
-                                move_frame
-                            ) = detect_human_move(
-                                sct,
-                                scrcpy_hwnd,
-                                board,
-                                baseline_frame,
-                                cached_board_coords,
-                                visual_black_perspective
-                            )
+                            move = None
+                            move_frame = None
+
+                            # Dedicated startup recovery for Human-White's very
+                            # first move. This check is independent of
+                            # baseline_frame, so it still works when the first
+                            # move happened during the new-game transition and
+                            # the normal baseline was captured too late.
+                            if (
+                                human_color == chess.WHITE
+                                and not board.move_stack
+                            ):
+                                first_probe_frame = capture_screen(
+                                    sct,
+                                    scrcpy_hwnd
+                                )
+
+                                first_probe_move = None
+
+                                if first_probe_frame is not None:
+                                    first_probe_move = (
+                                        detect_existing_white_first_move(
+                                            first_probe_frame,
+                                            board,
+                                            cached_board_coords,
+                                            visual_black_perspective
+                                        )
+                                    )
+
+                                if first_probe_move is not None:
+                                    time.sleep(
+                                        TURN_RESCAN_CONFIRM_DELAY
+                                    )
+
+                                    second_probe_frame = capture_screen(
+                                        sct,
+                                        scrcpy_hwnd
+                                    )
+
+                                    second_probe_move = None
+
+                                    if second_probe_frame is not None:
+                                        second_probe_move = (
+                                            detect_existing_white_first_move(
+                                                second_probe_frame,
+                                                board,
+                                                cached_board_coords,
+                                                visual_black_perspective
+                                            )
+                                        )
+
+                                    if (
+                                        second_probe_move is not None
+                                        and second_probe_move == first_probe_move
+                                    ):
+                                        move = second_probe_move
+                                        move_frame = (
+                                            second_probe_frame
+                                            if second_probe_frame is not None
+                                            else first_probe_frame
+                                        )
+                                        detection_source = (
+                                            "INITIAL_WHITE_FIRST_MOVE_RECOVERY"
+                                        )
+                                        detect_human_move._last_detection_source = (
+                                            detection_source
+                                        )
+
+                                        print(
+                                            "[RECOVERY] White first move already on screen | "
+                                            f"{move.uci()} | "
+                                            "consecutive full-board verification PASS"
+                                        )
+
+                            if move is None or move_frame is None:
+                                (
+                                    move,
+                                    move_frame
+                                ) = detect_human_move(
+                                    sct,
+                                    scrcpy_hwnd,
+                                    board,
+                                    baseline_frame,
+                                    cached_board_coords,
+                                    visual_black_perspective
+                                )
 
                         if (
                             move is not None
