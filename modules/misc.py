@@ -1025,42 +1025,18 @@ def main():
             ):
                 return None
 
-            review_y1 = int(height * 0.79)
-            review_y2 = int(height * 0.87)
-            review_x1 = int(width * 0.03)
-            review_x2 = int(width * 0.88)
-
-            review = frame[
-                review_y1:review_y2,
-                review_x1:review_x2
-            ]
-
-            hsv = cv2.cvtColor(
-                review,
-                cv2.COLOR_BGR2HSV
+            # Normal completed-result screen: the right-side New
+            # <time-control> button is the action target. It is not
+            # necessarily green, so do not use lower green controls such
+            # as Game Review to identify it.
+            return (
+                int(width * 0.735),
+                int(height * 0.392)
             )
-
-            green_mask = (
-                (hsv[:, :, 0] >= 30)
-                & (hsv[:, :, 0] <= 95)
-                & (hsv[:, :, 1] >= 60)
-                & (hsv[:, :, 2] >= 70)
-            )
-
-            green_fraction = float(
-                np.mean(green_mask)
-            )
-
-            if green_fraction >= 0.035:
-                # Normal result screen: right-side New <time-control>.
-                return (
-                    int(width * 0.735),
-                    int(height * 0.392)
-                )
 
             # Game-aborted screen: only a lower green New <time-control>
             # button is present; there is no Rematch button.
-            full_hsv = cv2.cvtColor(
+            full_hsv = cv2.cvt(
                 frame,
                 cv2.COLOR_BGR2HSV
             )
