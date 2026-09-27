@@ -661,6 +661,7 @@ def main():
     new_match_start_stable = 0
     new_match_start_key = None
     new_match_scan_ms = 0.0
+    next_manual_new_match_check = 0.0
 
     def board_interruption_fraction(
         reference_frame,
@@ -757,13 +758,9 @@ def main():
             return 0.0
 
     def detect_new_game_button(frame):
-        """Detect the right-side New <time-control> button on the result page.
+        """Detect New controls on result and aborted-game screens."""
+        detect_new_game_button._abort_layout = False
 
-        The label may be 1+1, 2+1, 3+2, 5 min, etc. The button position is
-        stable, so detection is based on the result-page layout rather than
-        OCR/text. A green Game Review bar near the bottom is required before
-        returning the click point.
-        """
         if frame is None:
             return None
 
@@ -825,14 +822,96 @@ def main():
                 np.mean(green_mask)
             )
 
-            if green_fraction < 0.035:
+            if green_fraction >= 0.035:
+                # Normal result screen: right-side New <time-control>.
+                return (
+                    int(width * 0.735),
+                    int(height * 0.392)
+                )
+
+            # Game-aborted screen: only a lower green New <time-control>
+            # button is present; there is no Rematch button.
+            full_hsv = cv2.cvtColor(
+                frame,
+                cv2.COLOR_BGR2HSV
+            )
+
+            lower_y1 = int(height * 0.48)
+            lower_roi = full_hsv[
+                lower_y1:,
+                :
+            ]
+
+            lower_green = (
+                (lower_roi[:, :, 0] >= 30)
+                & (lower_roi[:, :, 0] <= 95)
+                & (lower_roi[:, :, 1] >= 70)
+                & (lower_roi[:, :, 2] >= 70)
+            ).astype(
+                np.uint8
+            )
+
+            lower_green = cv2.morphologyEx(
+                lower_green,
+                cv2.MORPH_CLOSE,
+                np.ones(
+                    (5, 5),
+                    np.uint8
+                )
+            )
+
+            contours, _ = cv2.findContours(
+                lower_green,
+                cv2.RETR_EXTERNAL,
+                cv2.CHAIN_APPROX_SIMPLE
+            )
+
+            candidates = []
+
+            for contour in contours:
+                x, y, w, h = cv2.boundingRect(
+                    contour
+                )
+
+                area = w * h
+                aspect = (
+                    w / float(h)
+                    if h > 0
+                    else 0.0
+                )
+
+                if (
+                    area >= width * height * 0.006
+                    and w >= width * 0.16
+                    and h >= max(
+                        18,
+                        int(height * 0.015)
+                    )
+                    and aspect >= 2.0
+                ):
+                    candidates.append(
+                        (
+                            area,
+                            x,
+                            y + lower_y1,
+                            w,
+                            h
+                        )
+                    )
+
+            if not candidates:
                 return None
 
-            # Center of the right-side New <time-control> button.
-            # The text can vary, but the button position is stable.
+            _, x, y, w, h = max(
+                candidates,
+                key=lambda item: item[0]
+            )
+
+            detect_new_game_button._abort_layout = True
+
             return (
-                int(width * 0.735),
-                int(height * 0.392)
+                int(x + w / 2),
+                int(y + h / 2)
             )
 
         except Exception:
@@ -1128,6 +1207,7 @@ def main():
                     new_match_start_stable = 0
                     new_match_start_key = None
                     new_match_scan_ms = 0.0
+                    next_manual_new_match_check = 0.0
                     screen_interrupted = False
                     screen_interrupt_bad_samples = 0
                     screen_interrupt_clear_samples = 0
@@ -1678,6 +1758,9 @@ def main():
                                                 False
                                             )
                                         )
+
+                                        if detect_new_game_button._abort_layout:
+                                            use_rematch = False
 
                                         action_button = (
                                             (
