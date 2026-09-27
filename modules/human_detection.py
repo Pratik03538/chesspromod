@@ -439,6 +439,23 @@ def periodic_full_board_catchup_scan(
                 if detected == expected_symbol:
                     exact += 1
                     continue
+            else:
+                # Empty squares use the stricter threshold so UI highlights
+                # and anti-aliasing are not treated as real pieces.
+                crop = get_square_crop(
+                    frame,
+                    board_coords,
+                    square,
+                    black_perspective
+                )
+                detected, _ = classify_square(
+                    crop,
+                    templates,
+                    match_threshold=EMPTY_DEST_MATCH_THRESHOLD
+                )
+                if detected is None:
+                    exact += 1
+                    continue
 
             mismatches.append((
                 square,
