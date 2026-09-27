@@ -506,8 +506,8 @@ def main():
         except Exception:
             _execution_state_active = False
 
-    # Keep the terminal clean. All user-facing move/rank output is rendered
-    # by the game UI instead of the diagnostic console.
+    # Keep live diagnostics visible in the terminal. This only changes
+    # logging; it does not change move selection, verification, or UI logic.
     builtins_module = __import__(
         "builtins"
     )
@@ -520,13 +520,22 @@ def main():
             builtins_module.print
         )
 
-    def _quiet_chess_print(
+    def _live_chess_print(
         *args,
         **kwargs
     ):
-        return None
+        timestamp = time.strftime("%H:%M:%S")
+        original_print = (
+            builtins_module._chess_original_print
+        )
+        original_print(
+            f"[{timestamp}]",
+            *args,
+            flush=True,
+            **kwargs
+        )
 
-    builtins_module.print = _quiet_chess_print
+    builtins_module.print = _live_chess_print
 
     print(
         "============================================================"
