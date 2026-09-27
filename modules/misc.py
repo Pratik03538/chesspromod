@@ -506,8 +506,7 @@ def main():
         except Exception:
             _execution_state_active = False
 
-    # Keep live diagnostics visible in the terminal. This only changes
-    # logging; it does not change move selection, verification, or UI logic.
+    # Keep live diagnostics visible in the terminal. This changes logging only.
     builtins_module = __import__(
         "builtins"
     )
@@ -525,13 +524,10 @@ def main():
         **kwargs
     ):
         timestamp = time.strftime("%H:%M:%S")
-        original_print = (
-            builtins_module._chess_original_print
-        )
-        original_print(
+        kwargs["flush"] = True
+        builtins_module._chess_original_print(
             f"[{timestamp}]",
             *args,
-            flush=True,
             **kwargs
         )
 
@@ -1353,44 +1349,10 @@ def main():
 
     with mss.mss() as sct:
         try:
-            last_live_heartbeat = 0.0
-
             while True:
                 key = cv2.waitKey(
                     1
                 ) & 0xFF
-
-                heartbeat_now = time.perf_counter()
-                if heartbeat_now - last_live_heartbeat >= 1.0:
-                    last_live_heartbeat = heartbeat_now
-
-                    try:
-                        turn_name = (
-                            "WHITE"
-                            if board.turn == chess.WHITE
-                            else "BLACK"
-                        )
-                        bot_name = (
-                            "STOCKFISH"
-                            if stockfish_color is not None
-                            and board.turn == stockfish_color
-                            else "HUMAN"
-                        )
-                        print(
-                            "[HEARTBEAT] "
-                            f"game_ready={game_ready} "
-                            f"grid_locked={grid_locked} "
-                            f"bot_thinking={bot_thinking} "
-                            f"turn={turn_name}/{bot_name} "
-                            f"ply={len(board.move_stack)} "
-                            f"pending={len(pending_bot_moves)} "
-                            f"screen_guard={screen_interrupted} "
-                            f"obstruction={screen_interrupt_fraction:.3f}"
-                        )
-                    except Exception as _heartbeat_error:
-                        print(
-                            f"[HEARTBEAT ERROR] {_heartbeat_error}"
-                        )
 
                 if key == ord("q"):
                     save_game_pgn(
@@ -3472,112 +3434,6 @@ def main():
                                         "physical board matches internal board 64/64"
                                     )
 
-                                    # Keep ordinary moves fast. Allow a longer,
-                                    # variable thinking pause only for tactical/mate
-                                    # decisions. The selected move itself is unchanged.
-                                    thinking_delay = random.uniform(
-                                        0.000,
-                                        0.008
-                                    )
-
-                                    selection_reason = str(
-                                        selection_meta.get(
-                                            "reason",
-                                            ""
-                                        )
-                                    ).upper()
-
-                                    current_cp = int(
-                                        selection_meta.get(
-                                            "current_cp",
-                                            0
-                                        )
-                                        or 0
-                                    )
-
-                                    if "MATE" in selection_reason:
-                                        mate_marker = "TARGET=M"
-                                        mate_pos = selection_reason.find(
-                                            mate_marker
-                                        )
-
-                                        if mate_pos >= 0:
-                                            mate_start = (
-                                                mate_pos
-                                                + len(mate_marker)
-                                            )
-                                            mate_digits = ""
-
-                                            while (
-                                                mate_start
-                                                < len(selection_reason)
-                                                and selection_reason[mate_start].isdigit()
-                                            ):
-                                                mate_digits += selection_reason[mate_start]
-                                                mate_start += 1
-
-                                            mate_distance = (
-                                                int(mate_digits)
-                                                if mate_digits
-                                                else 99
-                                            )
-
-                                            if mate_distance <= 1:
-                                                thinking_delay = random.uniform(
-                                                    0.15,
-                                                    0.55
-                                                )
-                                            elif mate_distance <= 3:
-                                                thinking_delay = random.uniform(
-                                                    0.25,
-                                                    0.95
-                                                )
-                                            elif mate_distance <= 5:
-                                                thinking_delay = random.uniform(
-                                                    0.20,
-                                                    0.80
-                                                )
-                                            else:
-                                                thinking_delay = random.uniform(
-                                                    0.08,
-                                                    0.45
-                                                )
-                                        else:
-                                            thinking_delay = random.uniform(
-                                                0.12,
-                                                0.55
-                                            )
-
-                                    elif (
-                                        "DEEP CALC" in selection_reason
-                                        or "GREAT MOVE" in selection_reason
-                                    ):
-                                        thinking_delay = random.uniform(
-                                            0.10,
-                                            0.70
-                                        )
-
-                                    elif (
-                                        board.is_capture(best_move)
-                                        or board.gives_check(best_move)
-                                    ):
-                                        thinking_delay = random.uniform(
-                                            0.015,
-                                            0.18
-                                        )
-
-                                    elif current_cp >= 500:
-                                        thinking_delay = random.uniform(
-                                            0.005,
-                                            0.035
-                                        )
-
-                                    if thinking_delay > 0.0:
-                                        set_bot_ui_state("THINKING")
-                                        time.sleep(
-                                            thinking_delay
-                                        )
-
                                     set_bot_ui_state("CLICKING")
 
                                     clicked = click_move(
@@ -3887,7 +3743,6 @@ def main():
                             result=None,
                             termination=None
                         )
-
                         game_ready = False
 
                         print_game_state(
