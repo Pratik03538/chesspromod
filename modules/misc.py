@@ -3429,6 +3429,96 @@ def main():
                                         "physical board matches internal board 64/64"
                                     )
 
+                                    # Keep ordinary moves fast. Allow a longer,
+                                    # variable thinking pause only for tactical/mate
+                                    # decisions. The selected move itself is unchanged.
+                                    thinking_delay = random.uniform(
+                                        0.000,
+                                        0.008
+                                    )
+
+                                    selection_reason = str(
+                                        selection_meta.get(
+                                            "reason",
+                                            ""
+                                        )
+                                    ).upper()
+
+                                    current_cp = int(
+                                        selection_meta.get(
+                                            "current_cp",
+                                            0
+                                        )
+                                        or 0
+                                    )
+
+                                    if "MATE" in selection_reason:
+                                        mate_match = re.search(
+                                            r"M(\d+)",
+                                            selection_reason
+                                        )
+
+                                        if mate_match:
+                                            mate_distance = int(
+                                                mate_match.group(1)
+                                            )
+
+                                            if mate_distance <= 1:
+                                                thinking_delay = random.uniform(
+                                                    0.15,
+                                                    0.55
+                                                )
+                                            elif mate_distance <= 3:
+                                                thinking_delay = random.uniform(
+                                                    0.25,
+                                                    0.95
+                                                )
+                                            elif mate_distance <= 5:
+                                                thinking_delay = random.uniform(
+                                                    0.20,
+                                                    0.80
+                                                )
+                                            else:
+                                                thinking_delay = random.uniform(
+                                                    0.08,
+                                                    0.45
+                                                )
+                                        else:
+                                            thinking_delay = random.uniform(
+                                                0.12,
+                                                0.55
+                                            )
+
+                                    elif (
+                                        "DEEP CALC" in selection_reason
+                                        or "GREAT MOVE" in selection_reason
+                                    ):
+                                        thinking_delay = random.uniform(
+                                            0.10,
+                                            0.70
+                                        )
+
+                                    elif (
+                                        board.is_capture(best_move)
+                                        or board.gives_check(best_move)
+                                    ):
+                                        thinking_delay = random.uniform(
+                                            0.015,
+                                            0.18
+                                        )
+
+                                    elif current_cp >= 500:
+                                        thinking_delay = random.uniform(
+                                            0.005,
+                                            0.035
+                                        )
+
+                                    if thinking_delay > 0.0:
+                                        set_bot_ui_state("THINKING")
+                                        time.sleep(
+                                            thinking_delay
+                                        )
+
                                     set_bot_ui_state("CLICKING")
 
                                     clicked = click_move(
