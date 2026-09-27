@@ -729,8 +729,6 @@ def main():
         draw_overlay._game_started_at = current_game_started_at
 
     def set_bot_ui_state(label):
-        nonlocal display_frame
-
         now_state = time.perf_counter()
         current_state = getattr(
             draw_overlay,
@@ -741,39 +739,6 @@ def main():
         if current_state != label:
             draw_overlay._bot_state = label
             draw_overlay._bot_state_since = now_state
-
-            try:
-                if (
-                    display_frame is not None
-                    and cached_board_coords is not None
-                ):
-                    display_frame = draw_overlay(
-                        display_frame,
-                        cached_board_coords,
-                        cached_board_grid,
-                        grid_locked,
-                        visual_black_perspective,
-                        last_scan_time_ms,
-                        "READY",
-                        (
-                            stockfish_color
-                            if stockfish_color is not None
-                            else chess.BLACK
-                        ),
-                        (
-                            human_color
-                            if human_color is not None
-                            else chess.WHITE
-                        ),
-                        analysis_state
-                    )
-                    cv2.imshow(
-                        "Chess Vision Tracker",
-                        display_frame
-                    )
-                    cv2.waitKey(1)
-            except Exception:
-                pass
 
     draw_overlay._match_state = "WAITING"
     draw_overlay._bot_state = "WAITING"
@@ -2060,9 +2025,21 @@ def main():
                     and cached_board_coords
                     and not awaiting_new_match
                 ):
-                    result_button = detect_new_game_button(
-                        frame
-                    )
+                    if board.is_game_over():
+                        # On a normal completed-game result screen, always use
+                        # the right-side New <time-control> button. Do not use
+                        # any lower green button such as Game Review.
+                        result_button = (
+                            int(frame.shape[1] * 0.735),
+                            int(frame.shape[0] * 0.392)
+                        )
+                        detect_new_game_button._abort_layout = False
+                    else:
+                        # Only aborted/incomplete games use the lower-screen
+                        # New button detector.
+                        result_button = detect_new_game_button(
+                            frame
+                        )
 
                     if result_button is not None:
                         result_obstruction = 0.0
@@ -2216,7 +2193,10 @@ def main():
                                             )
                                         )
 
-                                        if detect_new_game_button._abort_layout:
+                                        if (
+                                            board.is_game_over()
+                                            or detect_new_game_button._abort_layout
+                                        ):
                                             use_rematch = False
 
                                         action_button = (
