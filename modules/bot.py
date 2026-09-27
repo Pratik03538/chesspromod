@@ -203,7 +203,10 @@ def select_promotion_piece(
         PROMOTION_RETRIES + 1
     ):
         time.sleep(
-            PROMOTION_WAIT
+            random.uniform(
+                PROMOTION_WAIT_MIN,
+                PROMOTION_WAIT_MAX
+            )
         )
 
         square = find_promotion_choice(
@@ -454,6 +457,31 @@ def _verify_source_click_selected(
         time.sleep(BOT_SOURCE_SELECT_POLL)
 
     return False, last_reason
+
+
+def human_reaction_delay_seconds(move, board):
+    """Return a very small low-latency response variation for bullet play."""
+    try:
+        # Keep most moves very fast; only a small fraction gets an extra
+        # hesitation so the total game time is not materially increased.
+        if random.random() < REACTION_OCCASIONAL_CHANCE:
+            return random.uniform(
+                REACTION_OCCASIONAL_MIN,
+                REACTION_OCCASIONAL_MAX
+            )
+
+        if board.is_capture(move) or board.gives_check(move):
+            return random.uniform(
+                REACTION_NORMAL_MIN,
+                REACTION_NORMAL_MAX
+            )
+
+        return random.uniform(
+            REACTION_FAST_MIN,
+            REACTION_FAST_MAX
+        )
+    except Exception:
+        return 0.0
 
 
 def mate_pause_seconds(info, mover_color):
