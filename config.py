@@ -352,6 +352,16 @@ FORCE_BEST_IMPROVEMENT_FRACTION = 0.65
 HUMAN_ADVANTAGE_START_CP = 400
 
 
+# Once the bot reaches a clear advantage, switch into a persistent
+# winning-conversion mode. This mode is intentionally stronger than the
+# normal human-like selector so a large advantage is converted into a win
+# instead of being given back by random rank choices.
+WINNING_LOCK_START_CP = 300
+WINNING_KILL_START_CP = 700
+WINNING_SQUEEZE_GAP_CP = 20
+WINNING_LOCK_EXIT_CP = -150
+
+
 HUMAN_ADVANTAGE_MAINTAIN_BAND_CP = 30
 
 
