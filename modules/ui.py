@@ -41,6 +41,35 @@ def draw_overlay(
 ):
     height, width = display_frame.shape[:2]
 
+    panel_margin = 14
+    panel_w = min(
+        340,
+        max(
+            285,
+            int(width * 0.27)
+        )
+    )
+    canvas_pad = panel_margin + panel_w + panel_margin
+
+    # Always render the UI on a dedicated area OUTSIDE the captured board.
+    # The original screenshot keeps its exact coordinates; the side panel is
+    # appended to the right so no move/status text can ever cover the board.
+    canvas = np.zeros(
+        (
+            height,
+            width + canvas_pad,
+            3
+        ),
+        dtype=display_frame.dtype
+    )
+    canvas[:, :width] = display_frame
+    canvas[:, width:] = (
+        (16, 16, 20)
+    )
+
+    display_frame = canvas
+    width = canvas.shape[1]
+
     ui_state = getattr(
         draw_overlay,
         "_ui_state",
@@ -175,14 +204,6 @@ def draw_overlay(
         time.perf_counter() - bot_state_since
     )
 
-    panel_w = min(
-        340,
-        max(
-            285,
-            int(width * 0.27)
-        )
-    )
-
     x, y, w, h = board_coords
 
     move_text = getattr(
@@ -222,47 +243,15 @@ def draw_overlay(
     if panel_h > height - 20:
         panel_h = height - 20
 
-    # Prefer right side, then left side, then below/above. Never draw the
-    # information panel over the chessboard when an outside position exists.
-    if x + w + panel_w + 16 <= width:
-        panel_x = x + w + 12
-        panel_y = max(
-            10,
-            min(
-                y,
-                height - panel_h - 10
-            )
+    # The panel is on the appended right-side canvas only.
+    panel_x = width - panel_w - panel_margin
+    panel_y = max(
+        10,
+        min(
+            y,
+            height - panel_h - 10
         )
-    elif x - panel_w - 16 >= 0:
-        panel_x = x - panel_w - 16
-        panel_y = max(
-            10,
-            min(
-                y,
-                height - panel_h - 10
-            )
-        )
-    elif y + h + panel_h + 16 <= height:
-        panel_x = max(
-            10,
-            min(
-                x,
-                width - panel_w - 10
-            )
-        )
-        panel_y = y + h + 12
-    else:
-        panel_x = max(
-            10,
-            min(
-                x,
-                width - panel_w - 10
-            )
-        )
-        panel_y = max(
-            10,
-            y - panel_h - 12
-        )
+    )
 
     overlay = display_frame.copy()
 
@@ -706,6 +695,8 @@ def draw_overlay(
                 grid_color,
                 1
             )
+
+    return display_frame
 
 
 def format_board_for_screen(
