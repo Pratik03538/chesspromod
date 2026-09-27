@@ -3530,10 +3530,24 @@ def main():
                                         )
 
                                     if thinking_delay > 0.0:
+                                        if thinking_delay > 0.0:
                                         set_bot_ui_state("THINKING")
                                         time.sleep(
                                             thinking_delay
                                         )
+
+                                    try:
+                                        from modules import human_analysis as _human_analysis
+                                        _human_analysis.record_move_decision(
+                                            best_move,
+                                            selection_meta.get("rank", 0),
+                                            selection_meta.get("current_cp", 0),
+                                            selection_meta.get("selected_cp", 0),
+                                            selection_meta.get("reason", ""),
+                                            thinking_delay
+                                        )
+                                    except Exception:
+                                        pass
 
                                     set_bot_ui_state("CLICKING")
 
@@ -3844,6 +3858,17 @@ def main():
                             result=None,
                             termination=None
                         )
+
+                        try:
+                            from modules import human_analysis as _human_analysis
+                            _human_analysis.print_report(
+                                board
+                            )
+                        except Exception as _analysis_error:
+                            print(
+                                f"[ANALYSIS ERROR] {_analysis_error}"
+                            )
+
                         game_ready = False
 
                         print_game_state(
