@@ -596,99 +596,104 @@ def periodic_full_board_catchup_scan(
 
     # Bot retry recovery can be called with a known pre-click baseline.
     # In that mode, a move may only be recovered when:
-    #   1) the first frame still matches the last committed internal board, and
+    #   1) the first frame matches the last committed internal board, and
     #   2) the second frame matches the exact expected post-move board.
-    # This prevents a static/misclassified current frame from being promoted
-    # into a successful Stockfish move merely because two scans look identical.
+    #
+    # IMPORTANT SPEED RULE:
+    # Never run a full 64-square verification separately for every legal
+    # human reply. Scan frame_b once, rank all hypotheses cheaply, then run
+    # strict verification only on the single best hypothesis.
     if require_transition_from_first_frame and pending_bot_move is not None:
-        baseline_ok, baseline_reason = full_board_state_confirmed(
+        baseline_mismatch, _, baseline_details = robust_mismatch(
             frame_a,
-            board,
-            board_coords,
-            black_perspective
+            observed_a,
+            board
         )
 
-        if baseline_ok:
-            transition_candidates = []
-
+        if baseline_mismatch <= TURN_RESCAN_MAX_MISMATCH:
             bot_after = expected_board_after_move(
                 board,
                 pending_bot_move
             )
 
-            post_ok, post_reason = full_board_state_confirmed(
-                frame_b,
-                bot_after,
-                board_coords,
-                black_perspective
-            )
+            transition_candidates = [{
+                "kind": "BOT_ONLY",
+                "bot_move": pending_bot_move,
+                "human_move": None,
+                "expected_board": bot_after,
+                "raw_mismatch_b": raw_mismatch(
+                    observed_b,
+                    bot_after
+                ),
+            }]
 
-            if post_ok:
-                transition_candidates.append({
-                    "kind": "BOT_ONLY",
-                    "bot_move": pending_bot_move,
-                    "human_move": None,
-                    "expected_board": bot_after,
-                    "reason": (
-                        "known internal pre-state followed by exact "
-                        "Stockfish post-state"
-                    ),
-                })
-
+            # If the human may already have replied before the retry reached
+            # this recovery pass, add those hypotheses using ONLY the already
+            # scanned frame_b. No extra full-board scan is performed here.
             for human_move in bot_after.legal_moves:
                 final_board = expected_board_after_move(
                     bot_after,
                     human_move
                 )
+                transition_candidates.append({
+                    "kind": "BOT_PLUS_HUMAN",
+                    "bot_move": pending_bot_move,
+                    "human_move": human_move,
+                    "expected_board": final_board,
+                    "raw_mismatch_b": raw_mismatch(
+                        observed_b,
+                        final_board
+                    ),
+                })
 
-                final_ok, _ = full_board_state_confirmed(
+            transition_candidates.sort(
+                key=lambda item: (
+                    item["raw_mismatch_b"],
+                    0 if item["kind"] == "BOT_ONLY" else 1
+                )
+            )
+
+            # Only the best hypothesis gets the expensive authoritative
+            # full-board check.
+            best_transition = transition_candidates[0]
+            best_transition_ok, best_transition_reason = (
+                full_board_state_confirmed(
                     frame_b,
-                    final_board,
+                    best_transition["expected_board"],
                     board_coords,
                     black_perspective
                 )
+            )
 
-                if final_ok:
-                    transition_candidates.append({
-                        "kind": "BOT_PLUS_HUMAN",
-                        "bot_move": pending_bot_move,
-                        "human_move": human_move,
-                        "expected_board": final_board,
-                        "reason": (
-                            "known internal pre-state followed by exact "
-                            "Stockfish + human post-state"
-                        ),
-                    })
-
-            if transition_candidates:
-                # Prefer BOT_PLUS_HUMAN only when it is actually the exact
-                # physical final state; otherwise the bot-only state is used.
-                chosen_transition = transition_candidates[0]
-
+            if best_transition_ok:
                 progress(
                     "RECOVERY",
                     (
-                        f"TRANSITION VERIFIED | kind={chosen_transition['kind']} "
-                        f"bot={chosen_transition['bot_move'].uci()} "
-                        f"human={chosen_transition['human_move'].uci() if chosen_transition['human_move'] else '-'}"
+                        f"TRANSITION VERIFIED | kind={best_transition['kind']} "
+                        f"bot={best_transition['bot_move'].uci()} "
+                        f"human={best_transition['human_move'].uci() if best_transition['human_move'] else '-'} "
+                        f"mismatch={best_transition['raw_mismatch_b']}"
                     ),
                     key="turn_rescan_transition_verify",
                     force=True
                 )
 
                 return {
-                    "kind": chosen_transition["kind"],
-                    "bot_move": chosen_transition["bot_move"],
-                    "human_move": chosen_transition["human_move"],
+                    "kind": best_transition["kind"],
+                    "bot_move": best_transition["bot_move"],
+                    "human_move": best_transition["human_move"],
                     "frame": frame_b,
-                    "reason": chosen_transition["reason"],
+                    "reason": (
+                        "known internal pre-state followed by exact physical "
+                        "post-state; strict full-board verification passed"
+                    ),
                 }
 
             progress(
                 "RECOVERY",
                 (
-                    "TRANSITION CHECK | known internal pre-state confirmed, "
-                    "but expected Stockfish post-state was not confirmed"
+                    "TRANSITION CHECK | pre-state confirmed, but best "
+                    f"post-state rejected: {best_transition_reason}"
                 ),
                 key="turn_rescan_transition_wait",
                 force=True
@@ -699,7 +704,7 @@ def periodic_full_board_catchup_scan(
             "RECOVERY",
             (
                 "TRANSITION CHECK | first frame is not the exact internal "
-                f"pre-state: {baseline_reason}"
+                f"pre-state: mismatch={baseline_mismatch}"
             ),
             key="turn_rescan_transition_reject",
             force=True
