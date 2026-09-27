@@ -2164,6 +2164,10 @@ def main():
                     grid_locked
                     and cached_board_coords
                     and not awaiting_new_match
+                    and (
+                        board.is_game_over()
+                        or screen_interrupted
+                    )
                 ):
                     # Result handling is based only on the completed-game
                     # upper Rematch + New controls. Ignore every lower/green
