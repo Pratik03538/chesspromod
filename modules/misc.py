@@ -662,6 +662,116 @@ def main():
     new_match_start_key = None
     new_match_scan_ms = 0.0
     next_manual_new_match_check = 0.0
+    game_pgn_saved = False
+
+    def set_bot_ui_state(label):
+        now_state = time.perf_counter()
+        current_state = getattr(
+            draw_overlay,
+            "_bot_state",
+            None
+        )
+
+        if current_state != label:
+            draw_overlay._bot_state = label
+            draw_overlay._bot_state_since = now_state
+
+    draw_overlay._match_state = "WAITING"
+    draw_overlay._bot_state = "WAITING"
+    draw_overlay._bot_state_since = time.perf_counter()
+
+    def save_game_pgn(game_board, result=None, termination=None):
+        nonlocal game_pgn_saved
+
+        if game_pgn_saved or not game_board.move_stack:
+            return None
+
+        import os as _pgn_os
+        import time as _pgn_time
+        import chess.pgn as _chess_pgn
+
+        outcome = game_board.outcome()
+
+        if result is None:
+            result = (
+                outcome.result()
+                if outcome is not None
+                else "*"
+            )
+
+        if termination is None:
+            termination = (
+                str(outcome.termination).split(".")[-1]
+                if outcome is not None
+                else "unknown"
+            )
+
+        now = _pgn_time.localtime()
+        date_text = _pgn_time.strftime("%Y.%m.%d", now)
+        time_text = _pgn_time.strftime("%H:%M:%S", now)
+        stamp = _pgn_time.strftime("%Y-%m-%d_%H-%M-%S", now)
+
+        folder = _pgn_os.path.join(
+            _pgn_os.getcwd(),
+            "pgn_games"
+        )
+        _pgn_os.makedirs(
+            folder,
+            exist_ok=True
+        )
+
+        game = _chess_pgn.Game()
+        game.headers["Event"] = "Chess Vision Human vs Stockfish"
+        game.headers["Date"] = date_text
+        game.headers["Time"] = time_text
+        game.headers["White"] = (
+            "Stockfish"
+            if stockfish_color == chess.WHITE
+            else "Human"
+        )
+        game.headers["Black"] = (
+            "Stockfish"
+            if stockfish_color == chess.BLACK
+            else "Human"
+        )
+        game.headers["Result"] = result
+        game.headers["Termination"] = termination
+        game.headers["SetUp"] = "1"
+        game.headers["FEN"] = INITIAL_FEN
+
+        node = game
+        for move in game_board.move_stack:
+            node = node.add_variation(move)
+
+        path = _pgn_os.path.join(
+            folder,
+            f"game_{stamp}.pgn"
+        )
+
+        suffix = 2
+        while _pgn_os.path.exists(path):
+            path = _pgn_os.path.join(
+                folder,
+                f"game_{stamp}_{suffix}.pgn"
+            )
+            suffix += 1
+
+        with open(
+            path,
+            "w",
+            encoding="utf-8"
+        ) as pgn_file:
+            pgn_file.write(
+                str(game)
+                + "\n"
+            )
+
+        game_pgn_saved = True
+        print(
+            "[PGN] Saved: "
+            f"{path} | Result={result} | Termination={termination}"
+        )
+        return path
 
     def board_interruption_fraction(
         reference_frame,
@@ -1093,6 +1203,11 @@ def main():
                 ) & 0xFF
 
                 if key == ord("q"):
+                    save_game_pgn(
+                        board,
+                        result="*",
+                        termination="program stopped"
+                    )
                     break
 
                 if (
@@ -1168,17 +1283,16 @@ def main():
                 # ============================================================
                 # MANUAL NEW MATCH DETECTION DURING ACTIVE PLAY
                 # ============================================================
-                # A manual New/Rematch can replace the live game without any
-                # normal result screen. We only run this heavier check after
-                # the screen-guard has already detected a large unexpected
-                # board transition, so normal moves are not slowed down.
+                # A manual New can replace the live game without leaving a
+                # detectable result screen. Use a cheap frame-change gate first,
+                # then require the physical board to differ from the committed
+                # internal board before testing for a fresh game.
                 if (
                     game_ready
                     and grid_locked
                     and cached_board_coords
                     and not awaiting_new_match
                     and board.move_stack
-                    and screen_interrupted
                 ):
                     now_manual = time.perf_counter()
 
@@ -1187,107 +1301,154 @@ def main():
                             now_manual + 0.20
                         )
 
-                        manual_grid, _, manual_scan_ms = (
-                            scan_board(
-                                frame,
-                                cached_board_coords
+                        manual_change_triggered = screen_interrupted
+
+                        if (
+                            not manual_change_triggered
+                            and baseline_frame is not None
+                            and board_frame_change_score(
+                                baseline_frame,
+                                frame
+                            ) >= 0.003
+                        ):
+                            manual_change_triggered = True
+
+                        if manual_change_triggered:
+                            manual_grid, _, manual_scan_ms = (
+                                scan_board(
+                                    frame,
+                                    cached_board_coords
+                                )
                             )
-                        )
 
-                        detected_piece_count = sum(
-                            1
-                            for row in manual_grid
-                            for symbol in row
-                            if symbol is not None
-                        )
-
-                        if detected_piece_count >= 20:
-                            start_board = chess.Board(
-                                INITIAL_FEN
+                            detected_piece_count = sum(
+                                1
+                                for row in manual_grid
+                                for symbol in row
+                                if symbol is not None
                             )
 
-                            manual_new_match_key = None
+                            manual_pieces = grid_to_dict(
+                                manual_grid,
+                                visual_black_perspective
+                            )
 
-                            for manual_black_perspective in (
-                                False,
-                                True
+                            internal_mismatch = sum(
+                                1
+                                for square in chess.SQUARES
+                                if manual_pieces.get(square)
+                                != (
+                                    board.piece_at(square).symbol()
+                                    if board.piece_at(square) is not None
+                                    else None
+                                )
+                            )
+
+                            if (
+                                detected_piece_count >= 20
+                                and internal_mismatch >= 2
                             ):
-                                start_ok, _ = (
-                                    full_board_state_confirmed(
-                                        frame,
-                                        start_board,
-                                        cached_board_coords,
-                                        manual_black_perspective
-                                    )
+                                start_board = chess.Board(
+                                    INITIAL_FEN
                                 )
 
-                                if start_ok:
-                                    manual_new_match_key = (
-                                        f"{int(manual_black_perspective)}:START"
-                                    )
-                                    break
+                                manual_new_match_key = None
 
-                                if manual_black_perspective:
-                                    manual_first_move = (
-                                        detect_existing_white_first_move(
+                                for manual_black_perspective in (
+                                    False,
+                                    True
+                                ):
+                                    start_ok, _ = (
+                                        full_board_state_confirmed(
                                             frame,
                                             start_board,
                                             cached_board_coords,
-                                            True
+                                            manual_black_perspective
                                         )
                                     )
 
-                                    if manual_first_move is not None:
-                                        manual_first_board = (
-                                            expected_board_after_move(
-                                                start_board,
-                                                manual_first_move
-                                            )
+                                    if start_ok:
+                                        manual_new_match_key = (
+                                            f"{int(manual_black_perspective)}:START"
                                         )
+                                        break
 
-                                        first_ok, _ = (
-                                            full_board_state_confirmed(
+                                    if manual_black_perspective:
+                                        manual_first_move = (
+                                            detect_existing_white_first_move(
                                                 frame,
-                                                manual_first_board,
+                                                start_board,
                                                 cached_board_coords,
                                                 True
                                             )
                                         )
 
-                                        if first_ok:
-                                            manual_new_match_key = (
-                                                f"1:{manual_first_move.uci()}"
+                                        if manual_first_move is not None:
+                                            manual_first_board = (
+                                                expected_board_after_move(
+                                                    start_board,
+                                                    manual_first_move
+                                                )
                                             )
-                                            break
 
-                            if manual_new_match_key is not None:
-                                awaiting_new_match = True
-                                game_ready = False
-                                cached_board_grid = None
-                                baseline_frame = None
+                                            first_ok, _ = (
+                                                full_board_state_confirmed(
+                                                    frame,
+                                                    manual_first_board,
+                                                    cached_board_coords,
+                                                    True
+                                                )
+                                            )
 
-                                screen_interrupted = False
-                                screen_interrupt_bad_samples = 0
-                                screen_interrupt_clear_samples = 0
-                                screen_interrupt_fraction = 0.0
+                                            if first_ok:
+                                                manual_new_match_key = (
+                                                    f"1:{manual_first_move.uci()}"
+                                                )
+                                                break
 
-                                draw_overlay._rank_history.clear()
-                                draw_overlay._move_history_text = "-"
+                                if manual_new_match_key is not None:
+                                    save_game_pgn(
+                                        board,
+                                        result=(
+                                            None
+                                            if board.is_game_over()
+                                            else "*"
+                                        ),
+                                        termination=(
+                                            None
+                                            if board.is_game_over()
+                                            else "aborted"
+                                        )
+                                    )
 
-                                new_match_button_stable = 0
-                                new_match_button_center = None
-                                new_match_click_attempts = 0
-                                next_new_match_scan = (
-                                    time.perf_counter()
-                                    + 0.05
-                                )
-                                new_match_start_stable = 0
-                                new_match_start_key = None
-                                new_match_scan_ms = manual_scan_ms
-                                next_manual_new_match_check = (
-                                    time.perf_counter()
-                                    + 1.0
-                                )
+                                    awaiting_new_match = True
+                                    game_ready = False
+                                    cached_board_grid = None
+                                    baseline_frame = None
+
+                                    screen_interrupted = False
+                                    screen_interrupt_bad_samples = 0
+                                    screen_interrupt_clear_samples = 0
+                                    screen_interrupt_fraction = 0.0
+
+                                    draw_overlay._rank_history.clear()
+                                    draw_overlay._move_history_text = "-"
+
+                                    new_match_button_stable = 0
+                                    new_match_button_center = None
+                                    new_match_click_attempts = 0
+                                    next_new_match_scan = (
+                                        time.perf_counter()
+                                        + 0.05
+                                    )
+                                    new_match_start_stable = 0
+                                    new_match_start_key = None
+                                    new_match_scan_ms = manual_scan_ms
+                                    next_manual_new_match_check = (
+                                        time.perf_counter()
+                                        + 1.0
+                                    )
+
 
                 if key == ord("r"):
                     height, width = frame.shape[:2]
@@ -1522,6 +1683,7 @@ def main():
                                         )
 
                             game_ready = True
+                            game_pgn_saved = False
                             analysis_state = None
 
                             draw_overlay._move_history_text = format_move_history(
@@ -1767,6 +1929,24 @@ def main():
                         )
 
                         if result_screen:
+                            save_game_pgn(
+                                board,
+                                result=(
+                                    None
+                                    if board.is_game_over()
+                                    else "*"
+                                ),
+                                termination=(
+                                    None
+                                    if board.is_game_over()
+                                    else (
+                                        "aborted"
+                                        if detect_new_game_button._abort_layout
+                                        else "result screen"
+                                    )
+                                )
+                            )
+
                             button_changed = (
                                 new_match_button_center is None
                                 or (
@@ -2155,6 +2335,7 @@ def main():
 
                                     awaiting_new_match = False
                                     game_ready = True
+                                    game_pgn_saved = False
 
                                     out_of_book = False
                                     analysis_state = None
@@ -2276,6 +2457,8 @@ def main():
                         board.turn == human_color
                         and not bot_thinking
                     ):
+                        set_bot_ui_state("DETECTING HUMAN MOVE")
+
                         progress(
                             "WAIT",
                             (
@@ -2391,6 +2574,8 @@ def main():
                                     "full-board verification confirmed"
                                 )
                             else:
+                                set_bot_ui_state("VERIFYING HUMAN MOVE")
+
                                 (
                                     final_human_ok,
                                     final_human_frame,
@@ -2475,6 +2660,7 @@ def main():
                             in pending_bot_moves
                         ):
                             bot_thinking = True
+                            set_bot_ui_state("THINKING")
 
                             try:
                                 pending_entry = (
@@ -2944,6 +3130,8 @@ def main():
                                                     f"{chess.piece_name(best_move.promotion).upper()}"
                                                 )
 
+                                set_bot_ui_state("PRE-CLICK CHECK")
+
                                 if verified:
                                     pre_ok = True
                                     pre_reason = reason
@@ -3105,6 +3293,8 @@ def main():
                                         "physical board matches internal board 64/64"
                                     )
 
+                                    set_bot_ui_state("CLICKING")
+
                                     clicked = click_move(
                                         best_move,
                                         cached_board_coords,
@@ -3126,6 +3316,8 @@ def main():
                                         )
 
                                         continue
+
+                                    set_bot_ui_state("VERIFYING BOT MOVE")
 
                                     (
                                         verified,
@@ -3253,6 +3445,8 @@ def main():
                                             f"{retry_count}/"
                                             f"{BOT_CLICK_RETRIES}"
                                         )
+
+                                        set_bot_ui_state("RETRYING BOT MOVE")
 
                                         clicked_retry = click_move(
                                             best_move,
@@ -3403,6 +3597,11 @@ def main():
                                 bot_thinking = False
 
                     if board.is_game_over():
+                        save_game_pgn(
+                            board,
+                            result=None,
+                            termination=None
+                        )
                         game_ready = False
 
                         print_game_state(
@@ -3439,6 +3638,34 @@ def main():
                         last_wait_report = now
 
                 if cached_board_coords:
+                    if awaiting_new_match:
+                        draw_overlay._match_state = "WAITING"
+                        set_bot_ui_state(
+                            "WAITING FOR NEW GAME"
+                        )
+                    elif not game_ready or stockfish_color is None:
+                        draw_overlay._match_state = "WAITING"
+                        set_bot_ui_state("WAITING")
+                    elif screen_interrupted:
+                        draw_overlay._match_state = "PLAYING"
+                        set_bot_ui_state("PAUSED")
+                    elif bot_thinking:
+                        draw_overlay._match_state = "PLAYING"
+                        if getattr(draw_overlay, "_bot_state", None) not in {
+                            "THINKING",
+                            "PRE-CLICK CHECK",
+                            "CLICKING",
+                            "VERIFYING BOT MOVE",
+                            "RETRYING BOT MOVE"
+                        }:
+                            set_bot_ui_state("THINKING")
+                    elif board.turn == human_color:
+                        draw_overlay._match_state = "PLAYING"
+                        set_bot_ui_state("WAITING HUMAN MOVE")
+                    else:
+                        draw_overlay._match_state = "PLAYING"
+                        set_bot_ui_state("PLAYING BOT MOVE")
+
                     draw_overlay(
                         display_frame,
                         cached_board_coords,
