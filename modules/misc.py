@@ -2112,8 +2112,14 @@ def main():
                                 )
                             )
 
+                        normal_result_layout = (
+                            result_button is not None
+                            and not detect_new_game_button._abort_layout
+                        )
+
                         result_screen = (
                             board.is_game_over()
+                            or normal_result_layout
                             or result_obstruction > 0.10
                         )
 
@@ -2273,6 +2279,17 @@ def main():
                                             else result_button
                                         )
 
+                                        clicked_normal_result_new = (
+                                            not use_rematch
+                                            and not detect_new_game_button._abort_layout
+                                        )
+
+                                        print(
+                                            "[MATCH] Clicking "
+                                            f"{'Rematch' if use_rematch else 'New'} "
+                                            f"at ({action_button[0]},{action_button[1]})"
+                                        )
+
                                         click_x = (
                                             origin[0]
                                             + action_button[0]
@@ -2333,6 +2350,20 @@ def main():
                                             )
 
                                             if ack_button is None:
+                                                button_still_present = False
+                                                break
+
+                                            # After clicking the normal completed-result
+                                            # New button, a lower green control such as
+                                            # Game Review must NEVER count as the same
+                                            # button for retry purposes. If the upper
+                                            # Rematch/New pair is gone, the click is
+                                            # considered acknowledged and no second
+                                            # click is sent to the result page.
+                                            if (
+                                                clicked_normal_result_new
+                                                and detect_new_game_button._abort_layout
+                                            ):
                                                 button_still_present = False
                                                 break
 
