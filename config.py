@@ -352,6 +352,12 @@ FORCE_BEST_IMPROVEMENT_FRACTION = 0.65
 HUMAN_ADVANTAGE_START_CP = 400
 
 
+# Hard consistency rule for the highest favorable evaluation reached in a game.
+# The allowed drawdown is the smaller of 20% of that maximum or 3.00 pawns.
+WINNING_MAX_DRAWDOWN_PERCENT = 0.20
+WINNING_MAX_DRAWDOWN_CP = 300
+
+
 # Once the bot reaches a clear advantage, switch into a persistent
 # winning-conversion mode. This mode is intentionally stronger than the
 # normal human-like selector so a large advantage is converted into a win
