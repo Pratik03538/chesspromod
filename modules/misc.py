@@ -688,7 +688,9 @@ def main():
 
         import os as _pgn_os
         import time as _pgn_time
+        import datetime as _pgn_datetime
         import chess.pgn as _chess_pgn
+        from zoneinfo import ZoneInfo as _PgnZoneInfo
 
         outcome = game_board.outcome()
 
@@ -706,10 +708,15 @@ def main():
                 else "unknown"
             )
 
-        now = _pgn_time.localtime()
-        date_text = _pgn_time.strftime("%Y.%m.%d", now)
-        time_text = _pgn_time.strftime("%H:%M:%S", now)
-        stamp = _pgn_time.strftime("%Y-%m-%d_%H-%M-%S", now)
+        now = _pgn_datetime.datetime.now(
+            _PgnZoneInfo("Asia/Kolkata")
+        )
+        date_text = now.strftime("%Y.%m.%d")
+        time_text = now.strftime("%H:%M:%S")
+        timestamp_text = now.strftime(
+            "%Y-%m-%d %H:%M:%S %z"
+        )
+        stamp = now.strftime("%Y-%m-%d_%H-%M-%S")
 
         folder = _pgn_os.path.join(
             _pgn_os.getcwd(),
@@ -724,6 +731,8 @@ def main():
         game.headers["Event"] = "Chess Vision Human vs Stockfish"
         game.headers["Date"] = date_text
         game.headers["Time"] = time_text
+        game.headers["Timestamp"] = timestamp_text
+        game.headers["Timezone"] = "Asia/Kolkata (UTC+05:30)"
         game.headers["White"] = (
             "Stockfish"
             if stockfish_color == chess.WHITE
