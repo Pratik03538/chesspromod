@@ -3657,6 +3657,7 @@ def main():
                                 reason = "pending Stockfish move not yet confirmed"
 
                                 pending_recovery = None
+                                pending_unchanged_frame = None
 
                                 if pending_entry is not None:
                                     pending_recovery = periodic_full_board_catchup_scan(
@@ -3677,12 +3678,15 @@ def main():
                                     ):
                                         # The full rescan proved that no touch/move
                                         # happened and the physical board still matches
-                                        # the committed internal position. Refresh the
-                                        # baseline before the normal pre-click gate.
-                                        baseline_frame = pending_recovery["frame"]
+                                        # the committed internal position. Reuse that
+                                        # verified frame as the pre-click frame so a fresh
+                                        # rendering fluctuation cannot immediately fail the
+                                        # safety gate again.
+                                        pending_unchanged_frame = pending_recovery["frame"]
+                                        baseline_frame = pending_unchanged_frame
                                         print(
                                             "[RECOVERY] FULL RESCAN | board unchanged | "
-                                            "refreshed baseline before retry "
+                                            "refreshed pre-click frame before retry "
                                             f"{best_san}"
                                         )
 
@@ -3720,9 +3724,13 @@ def main():
                                         after_frame = recovery_frame
                                         reason = pending_recovery["reason"]
 
-                                before_frame = capture_screen(
-                                    sct,
-                                    scrcpy_hwnd
+                                before_frame = (
+                                    pending_unchanged_frame
+                                    if pending_unchanged_frame is not None
+                                    else capture_screen(
+                                        sct,
+                                        scrcpy_hwnd
+                                    )
                                 )
 
                                 if (
