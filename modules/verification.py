@@ -525,10 +525,9 @@ def verify_human_move_on_screen(
 ):
     """Fast human post-move physical verification.
 
-    The last verified frame is used as the reference. Every board square is
-    checked for unexpected pixel movement in one vectorized 128x128 diff,
-    while exact piece templates are checked only on the move's affected
-    squares. Internal board is still advanced only after this gate passes.
+    Uses the cheap whole-board motion map plus exact classification on the
+    move's affected squares. Expensive complete-board verification is kept
+    only for captures, castling, en-passant and promotion.
     """
     start = time.perf_counter()
     deadline = start + max(HUMAN_MOVE_TIMEOUT, 0.55)
@@ -544,6 +543,7 @@ def verify_human_move_on_screen(
         if candidate_frame is None:
             time.sleep(BOT_RECOVERY_POLL)
             continue
+
         last_frame = candidate_frame
 
         ok, reason = fast_expected_post_state_confirmed(
@@ -555,12 +555,23 @@ def verify_human_move_on_screen(
             black_perspective
         )
         if ok:
-            # Final authority is the actual scrcpy board image, not only the
-            # two affected squares. Require the complete expected position
-            # before the internal python-chess board is ever advanced.
+            strict_full = (
+                before_board.is_capture(move)
+                or before_board.is_castling(move)
+                or before_board.is_en_passant(move)
+                or move.promotion is not None
+            )
+
+            if not strict_full:
+                return True, candidate_frame, reason
+
+            expected_after = expected_board_after_move(
+                before_board,
+                move
+            )
             full_ok, full_reason = full_board_state_confirmed(
                 candidate_frame,
-                expected_board,
+                expected_after,
                 board_coords,
                 black_perspective
             )
@@ -569,14 +580,17 @@ def verify_human_move_on_screen(
                     "scrcpy full-board match 64/64; "
                     + reason
                 )
-            last_reason = full_reason
+
+            last_reason = (
+                "fast post-state passed but scrcpy full-board rejected: "
+                + full_reason
+            )
         else:
             last_reason = reason
 
         time.sleep(BOT_RECOVERY_POLL)
 
     return False, last_frame, last_reason
-
 
 def screen_matches_expected_bot_move(
     frame,
