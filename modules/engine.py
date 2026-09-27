@@ -399,11 +399,53 @@ def choose_stockfish_move(
             ) >= 2
         ]
 
+        # When the current safety branch contains only #1/#2, do not fall
+        # back to another top-two move merely because that branch is narrow.
+        # Pull a lower MultiPV choice from the full position when it remains
+        # within a controlled evaluation band.
+        broad_lower_candidates = [
+            candidate
+            for candidate in candidates
+            if (
+                int(
+                    candidate.get(
+                        "rank",
+                        0
+                    )
+                ) >= 2
+                and int(
+                    candidate.get(
+                        "rank",
+                        0
+                    )
+                ) <= 7
+                and int(
+                    candidate.get(
+                        "cp",
+                        0
+                    )
+                )
+                >= max(
+                    50,
+                    int(
+                        current_advantage
+                        - 300
+                    )
+                )
+            )
+        ]
+
         if (
             previous_rank in (0, 1)
             and lower_candidates
         ):
             selection_pool = lower_candidates
+
+        elif (
+            previous_rank in (0, 1)
+            and broad_lower_candidates
+        ):
+            selection_pool = broad_lower_candidates
 
         elif (
             len(recent_ranks) >= 2
@@ -412,6 +454,14 @@ def choose_stockfish_move(
             and lower_candidates
         ):
             selection_pool = lower_candidates
+
+        elif (
+            len(recent_ranks) >= 2
+            and recent_ranks[-1] in (0, 1)
+            and recent_ranks[-2] in (0, 1)
+            and broad_lower_candidates
+        ):
+            selection_pool = broad_lower_candidates
 
         if len(selection_pool) == 1:
             selected_candidate = selection_pool[0]
