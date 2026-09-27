@@ -350,7 +350,8 @@ def choose_stockfish_move(
     opponent_accuracy=None,
     opponent_sample_count=0,
     opponent_pressure=False,
-    engine=None
+    engine=None,
+    opponent_engine_mode=False
 ):
     def choose_human_candidate(
         board,
@@ -911,6 +912,109 @@ def choose_stockfish_move(
     adaptive_max_drop = float(
         profile["max_eval_drop"]
     )
+
+    # ============================================================
+    # ENGINE-LIKE OPPONENT -> LOSS MODE
+    # ============================================================
+    # When the live opponent #1/#2 match rate crosses the configured
+    # engine threshold, stop trying to win. Keep the same human-like
+    # selector, but deliberately prefer lower MultiPV choices and allow
+    # normal inaccuracies/mistakes instead of the winning-conversion lock.
+    if opponent_engine_mode:
+        loss_pool = [
+            candidate
+            for candidate in candidates
+            if (
+                candidate["rank"] >= 2
+                and candidate["rank"] <= min(
+                    7,
+                    len(candidates) - 1
+                )
+            )
+        ]
+
+        # Occasionally allow a deeper human mistake while the flag is active.
+        if random.randint(1, 6) == 1:
+            deeper_loss_pool = [
+                candidate
+                for candidate in candidates
+                if (
+                    candidate["rank"] >= 7
+                    and candidate["rank"] <= min(
+                        14,
+                        len(candidates) - 1
+                    )
+                )
+            ]
+            if deeper_loss_pool:
+                loss_pool = deeper_loss_pool
+
+        if not loss_pool:
+            loss_pool = [
+                candidate
+                for candidate in candidates
+                if candidate["rank"] >= 1
+            ]
+
+        if not loss_pool:
+            loss_pool = [
+                best
+            ]
+
+        # Do not let the persistent winning floor veto the requested
+        # loss-mode behavior. The mode is entered only from the live
+        # opponent-engine flag and resets automatically with the game.
+        loss_rank_weights = []
+        for candidate in loss_pool:
+            rank = int(candidate.get("rank", 0))
+            loss_rank_weights.append(
+                max(
+                    1.0,
+                    float(rank + 1)
+                )
+            )
+
+        selected_loss = random.choices(
+            loss_pool,
+            weights=loss_rank_weights,
+            k=1
+        )[0]
+
+        selected_rank = int(
+            selected_loss.get(
+                "rank",
+                0
+            )
+        )
+
+        choose_stockfish_move._last_human_rank = selected_rank
+        choose_stockfish_move._recent_human_ranks = (
+            list(
+                getattr(
+                    choose_stockfish_move,
+                    "_recent_human_ranks",
+                    []
+                )
+            )
+            + [selected_rank]
+        )[-3:]
+        choose_stockfish_move._winning_conversion_cycle = 0
+
+        return (
+            selected_loss["move"],
+            selected_loss["info"],
+            {
+                "rank": selected_rank,
+                "current_cp": current_advantage,
+                "selected_cp": selected_loss["cp"],
+                "reason": (
+                    f"ENGINE OPPONENT LOSS MODE "
+                    f"(Engine #{selected_rank + 1}) | "
+                    f"BEST={best_cp / 100:+.2f} "
+                    f"SELECTED={selected_loss['cp'] / 100:+.2f}"
+                )
+            }
+        )
 
     # The Colab selector does not force #1 from the previous evaluation.
     # Human-like selection below is driven by the current MultiPV scores.
