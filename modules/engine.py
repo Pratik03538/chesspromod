@@ -489,71 +489,7 @@ def choose_stockfish_move(
             else:
                 choose_stockfish_move._winning_conversion_cycle = 0
 
-            selected_move = selected_candidate["move"]
-
-            choose_stockfish_move._last_winning_move_uci = (
-                selected_move.uci()
-            )
-
-            if current_advantage >= HUMAN_ADVANTAGE_START_CP:
-                is_progress_move = (
-                    board.is_capture(selected_move)
-                    or board.gives_check(selected_move)
-                    or selected_move.promotion is not None
-                    or selected_candidate["cp"]
-                    >= (
-                        current_advantage
-                        + HUMAN_ADVANTAGE_GROWTH_TRIGGER_CP
-                    )
-                )
-
-                if is_progress_move:
-                    choose_stockfish_move._winning_quiet_streak = 0
-                else:
-                    choose_stockfish_move._winning_quiet_streak = (
-                        getattr(
-                            choose_stockfish_move,
-                            "_winning_quiet_streak",
-                            0
-                        )
-                        + 1
-                    )
-            else:
-                choose_stockfish_move._winning_quiet_streak = 0
-
-            selected_move = selected_candidate["move"]
-
-        choose_stockfish_move._last_winning_move_uci = (
-            selected_move.uci()
-        )
-
-        if current_advantage >= HUMAN_ADVANTAGE_START_CP:
-            is_progress_move = (
-                board.is_capture(selected_move)
-                or board.gives_check(selected_move)
-                or selected_move.promotion is not None
-                or selected_candidate["cp"]
-                >= (
-                    current_advantage
-                    + HUMAN_ADVANTAGE_GROWTH_TRIGGER_CP
-                )
-            )
-
-            if is_progress_move:
-                choose_stockfish_move._winning_quiet_streak = 0
-            else:
-                choose_stockfish_move._winning_quiet_streak = (
-                    getattr(
-                        choose_stockfish_move,
-                        "_winning_quiet_streak",
-                        0
-                    )
-                    + 1
-                )
-        else:
-            choose_stockfish_move._winning_quiet_streak = 0
-
-        return selected_candidate
+            return selected_candidate
 
         weighted = []
 
@@ -824,8 +760,6 @@ def choose_stockfish_move(
             choose_stockfish_move._last_human_rank = None
             choose_stockfish_move._recent_human_ranks = []
             choose_stockfish_move._winning_conversion_cycle = 0
-            choose_stockfish_move._winning_quiet_streak = 0
-            choose_stockfish_move._last_winning_move_uci = None
             choose_stockfish_move._first_position_marker = first_position_marker
 
     mover = board.turn
@@ -1176,20 +1110,30 @@ def choose_stockfish_move(
                 )
 
     # 1. GM ACTIVE WINNING PLAY.
-    # A clear advantage should create forward progress, not endless holding.
-    # Captures/checks/promotions and useful pawn/king progress receive
-    # stronger weight, while safe human variation remains available.
+    # Clear advantage must lead to practical progress, not repeated holding.
+    # Keep the existing human-like selector so lower safe ranks can be used
+    # instead of forcing #1/#2 over and over.
     if current_advantage >= HUMAN_ADVANTAGE_START_CP:
-        quiet_streak = int(
+        recent_ranks = list(
             getattr(
                 choose_stockfish_move,
-                "_winning_quiet_streak",
-                0
+                "_recent_human_ranks",
+                []
             )
         )
 
-        # Rare deep calculation = occasional "great move" moment even in a
-        # winning position. Keep the existing 1/15 frequency.
+        previous_rank = (
+            int(recent_ranks[-1])
+            if recent_ranks
+            else getattr(
+                choose_stockfish_move,
+                "_last_human_rank",
+                None
+            )
+        )
+
+        # Occasional deeper "great move". Skip a same-position #1 repeat when
+        # the previous move was already a top-two choice.
         if (
             engine is not None
             and random.randint(
@@ -1233,18 +1177,16 @@ def choose_stockfish_move(
                 and deep_move in board.legal_moves
                 and deep_cp is not None
                 and deep_cp >= deep_floor_cp
+                and not (
+                    previous_rank in (0, 1)
+                    and deep_move == best["move"]
+                )
             ):
-                choose_stockfish_move._last_winning_move_uci = (
-                    deep_move.uci()
-                )
-                choose_stockfish_move._winning_quiet_streak = 0
+                choose_stockfish_move._last_human_rank = 0
+                choose_stockfish_move._recent_human_ranks = (
+                    recent_ranks + [0]
+                )[-3:]
                 choose_stockfish_move._winning_conversion_cycle = 0
-
-                capture_note = (
-                    " | HUMAN CAPTURE"
-                    if board.is_capture(deep_move)
-                    else ""
-                )
 
                 return (
                     deep_move,
@@ -1257,13 +1199,11 @@ def choose_stockfish_move(
                             "GREAT MOVE (Deep Calc) | "
                             f"BEST={current_advantage / 100:+.2f} "
                             f"DEEP={deep_cp / 100:+.2f}"
-                            f"{capture_note}"
                         )
                     }
                 )
 
-        # Controlled mistake: still human-like, but never allowed to destroy
-        # the winning cushion.
+        # Realistic imperfection, but with a recoverable winning cushion.
         if random.randint(
             1,
             12
@@ -1306,7 +1246,6 @@ def choose_stockfish_move(
                     }
                 )
 
-        # Rare controlled blunder at a very large advantage.
         if (
             current_advantage >= 700
             and random.randint(
@@ -1352,8 +1291,7 @@ def choose_stockfish_move(
                     }
                 )
 
-        # Inaccuracy remains possible while winning, but with a much smaller
-        # evaluation loss than the old +6 -> +3 style BAKWAS choices.
+        # Inaccuracy remains part of the human-like profile even while winning.
         if random.randint(
             1,
             7
@@ -1396,118 +1334,56 @@ def choose_stockfish_move(
                     }
                 )
 
-        # Two quiet winning moves are enough to trigger active conversion.
-        # At +8 or more, always use the active winning pool.
-        active_conversion = (
-            current_advantage >= HUMAN_LIKE_LAZY_MIN_ADVANTAGE_CP
-            or quiet_streak >= 2
-            or random.random() < 0.60
-            or opponent_pressure
+        # Active conversion: pick from a broad, safe winning pool. Passing the
+        # whole pool into choose_human_candidate is essential because that
+        # helper already avoids repeated #1/#2 when lower choices exist and
+        # strongly prefers captures/checks/promotions.
+        progress_floor_cp = max(
+            200,
+            current_advantage - 160
         )
 
-        if active_conversion:
-            progress_floor_cp = max(
-                200,
-                current_advantage - 160
+        progress_candidates = [
+            candidate
+            for candidate in candidates
+            if (
+                candidate["rank"] <= min(
+                    7,
+                    len(candidates) - 1
+                )
+                and candidate["cp"] >= progress_floor_cp
+            )
+        ]
+
+        if progress_candidates:
+            chosen = choose_human_candidate(
+                board,
+                progress_candidates
             )
 
-            previous_winning_move_uci = getattr(
-                choose_stockfish_move,
-                "_last_winning_move_uci",
-                None
+            capture_note = (
+                " | HUMAN CAPTURE"
+                if board.is_capture(chosen["move"])
+                else ""
             )
 
-            progress_candidates = [
-                candidate
-                for candidate in candidates
-                if (
-                    candidate["rank"] <= min(
-                        7,
-                        len(candidates) - 1
+            return (
+                chosen["move"],
+                chosen["info"],
+                {
+                    "rank": chosen["rank"],
+                    "current_cp": current_advantage,
+                    "selected_cp": chosen["cp"],
+                    "reason": (
+                        f"GM ACTIVE CONVERSION "
+                        f"(#{chosen['rank'] + 1}) | "
+                        f"FLOOR={progress_floor_cp / 100:+.2f} "
+                        f"BEST={best_cp / 100:+.2f} "
+                        f"SELECTED={chosen['cp'] / 100:+.2f}"
+                        f"{capture_note}"
                     )
-                    and candidate["cp"] >= progress_floor_cp
-                    and (
-                        previous_winning_move_uci is None
-                        or candidate["move"].uci()
-                        != previous_winning_move_uci
-                    )
-                )
-            ]
-
-            if progress_candidates:
-                # Use the complete safe winning pool so the existing
-                # anti-repeat human selector can move beyond #1.
-                progress_rank_candidates = []
-
-                for candidate in progress_candidates:
-                    move = candidate["move"]
-
-                    is_forcing = (
-                        board.is_capture(move)
-                        or board.gives_check(move)
-                        or move.promotion is not None
-                    )
-
-                    is_growth = (
-                        candidate["cp"]
-                        >= current_advantage
-                        + HUMAN_ADVANTAGE_GROWTH_TRIGGER_CP
-                    )
-
-                    moving_piece = board.piece_at(
-                        move.from_square
-                    )
-
-                    is_pawn_progress = (
-                        moving_piece is not None
-                        and moving_piece.piece_type
-                        == chess.PAWN
-                    )
-
-                    if (
-                        is_forcing
-                        or is_growth
-                        or is_pawn_progress
-                    ):
-                        progress_rank_candidates.append(
-                            candidate
-                        )
-
-                selection_source = (
-                    progress_rank_candidates
-                    if len(progress_rank_candidates) >= 2
-                    else progress_candidates
-                )
-
-                chosen = choose_human_candidate(
-                    board,
-                    selection_source
-                )
-
-                capture_note = (
-                    " | HUMAN CAPTURE"
-                    if board.is_capture(chosen["move"])
-                    else ""
-                )
-
-                return (
-                    chosen["move"],
-                    chosen["info"],
-                    {
-                        "rank": chosen["rank"],
-                        "current_cp": current_advantage,
-                        "selected_cp": chosen["cp"],
-                        "reason": (
-                            f"GM ACTIVE CONVERSION "
-                            f"(#{chosen['rank'] + 1}) | "
-                            f"STREAK={quiet_streak} "
-                            f"FLOOR={progress_floor_cp / 100:+.2f} "
-                            f"BEST={best_cp / 100:+.2f} "
-                            f"SELECTED={chosen['cp'] / 100:+.2f}"
-                            f"{capture_note}"
-                        )
-                    }
-                )
+                }
+            )
 
     # 2. LOW-ADVANTAGE HUMAN PLAY.
     # Replace the old top-3 Pull-Up cage with a safe human pool. The pool
@@ -1729,10 +1605,6 @@ def choose_stockfish_move(
                 choose_stockfish_move._recent_human_ranks = (
                     recent_ranks + [0]
                 )[-3:]
-                choose_stockfish_move._last_winning_move_uci = (
-                    deep_move.uci()
-                )
-                choose_stockfish_move._winning_quiet_streak = 0
                 choose_stockfish_move._winning_conversion_cycle = 0
 
                 return (
@@ -1849,7 +1721,6 @@ def choose_stockfish_move(
         HUMAN_LIKE_BAKWAS_MIN_ADVANTAGE_CP
         < current_advantage
         < HUMAN_LIKE_BAKWAS_MAX_ADVANTAGE_CP
-        and current_advantage < HUMAN_LIKE_LAZY_MIN_ADVANTAGE_CP
         and random.randint(
             1,
             HUMAN_LIKE_BAKWAS_CHANCE_DENOM
@@ -1876,7 +1747,7 @@ def choose_stockfish_move(
                     >= max(
                         100,
                         current_advantage
-                        - 150
+                        - 450
                     )
                     and candidate["cp"]
                     <= best_cp - 50
@@ -2127,6 +1998,3 @@ def choose_stockfish_move(
                 f"{selected['rank'] + 1}"
             )
         }
-    )
-
-
