@@ -652,6 +652,8 @@ def click_move(
             )
         )
 
+    _analysis_drag_start = time.perf_counter()
+
     print(
         f"[BOT DRAG] {move.uci()} "
         f"source=({sx},{sy}) "
@@ -734,6 +736,18 @@ def click_move(
         0,
         0
     )
+
+    try:
+        from modules import human_analysis as _human_analysis
+        _human_analysis.record_touch_behavior(
+            move,
+            (sx, sy),
+            (tx, ty),
+            path_points,
+            time.perf_counter() - _analysis_drag_start
+        )
+    except Exception:
+        pass
 
     user32.SetCursorPos(
         0,
