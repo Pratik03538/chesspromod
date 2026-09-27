@@ -476,6 +476,18 @@ def choose_stockfish_move(
         # back to another top-two move merely because that branch is narrow.
         # Pull a lower MultiPV choice from the full position when it remains
         # within a controlled evaluation band.
+        broad_lower_floor_cp = (
+            int(favorable_eval_floor_cp)
+            if favorable_floor_active
+            else max(
+                50,
+                int(
+                    current_advantage
+                    - 300
+                )
+            )
+        )
+
         broad_lower_candidates = [
             candidate
             for candidate in candidates
@@ -497,14 +509,7 @@ def choose_stockfish_move(
                         "cp",
                         0
                     )
-                )
-                >= max(
-                    50,
-                    int(
-                        current_advantage
-                        - 300
-                    )
-                )
+                ) >= broad_lower_floor_cp
             )
         ]
 
