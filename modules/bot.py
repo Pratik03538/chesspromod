@@ -456,6 +456,49 @@ def _verify_source_click_selected(
     return False, last_reason
 
 
+def mate_pause_seconds(info, mover_color):
+    """Return a small optional pause when the selected line reaches mate."""
+    if not info:
+        return 0.0
+
+    try:
+        score = info.get("score")
+        if score is None:
+            return 0.0
+
+        mate = score.pov(mover_color).mate()
+        if mate is None or mate <= 0:
+            return 0.0
+
+        if mate == 5:
+            if random.random() <= MATE_PAUSE_CHANCE_M5:
+                return random.uniform(
+                    MATE_PAUSE_M5_MIN,
+                    MATE_PAUSE_M5_MAX
+                )
+            return 0.0
+
+        if mate == 6:
+            if random.random() <= MATE_PAUSE_CHANCE_M6:
+                return random.uniform(
+                    MATE_PAUSE_M6_MIN,
+                    MATE_PAUSE_M6_MAX
+                )
+            return 0.0
+
+        if 7 <= mate <= 8:
+            if random.random() <= MATE_PAUSE_CHANCE_M7_8:
+                return random.uniform(
+                    MATE_PAUSE_M7_8_MIN,
+                    MATE_PAUSE_M7_8_MAX
+                )
+
+    except Exception:
+        return 0.0
+
+    return 0.0
+
+
 def click_move(
     move,
     board_coords,
@@ -599,8 +642,7 @@ def click_move(
             black_perspective
         )
 
-        # After promotion is also completed, keep the cursor off the board.
-        user32.SetCursorPos(0, 0)
+        # Leave the pointer at the promotion choice instead of teleporting it away.
         return promotion_ok
 
     return True
