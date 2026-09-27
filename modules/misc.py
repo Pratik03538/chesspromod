@@ -1230,8 +1230,96 @@ def main():
                         else:
                             game_start_hits = 0
 
+                        # Preserve the existing White-human first-move recovery
+                        # even while the game-start gate is active. A real first
+                        # move changes the board itself, so verify that legal
+                        # transition before enabling normal turn handling.
                         if (
-                            game_start_hits
+                            not game_started
+                            and human_color == chess.WHITE
+                        ):
+                            board_motion = fast_square_motion_scores(
+                                baseline_frame,
+                                frame,
+                                cached_board_coords,
+                                visual_black_perspective
+                            )
+
+                            motion_detected = (
+                                board_motion is not None
+                                and max(
+                                    board_motion.values()
+                                ) >= HUMAN_FAST_RESCAN_THRESHOLD
+                            )
+
+                            if motion_detected:
+                                first_move = (
+                                    detect_existing_white_first_move(
+                                        frame,
+                                        board,
+                                        cached_board_coords,
+                                        visual_black_perspective
+                                    )
+                                )
+
+                                if first_move is not None:
+                                    expected_first_board = (
+                                        expected_board_after_move(
+                                            board,
+                                            first_move
+                                        )
+                                    )
+
+                                    (
+                                        first_ok,
+                                        first_verified_frame,
+                                        first_reason
+                                    ) = verify_human_move_on_screen(
+                                        sct,
+                                        scrcpy_hwnd,
+                                        expected_first_board,
+                                        baseline_frame,
+                                        cached_board_coords,
+                                        visual_black_perspective,
+                                        first_move,
+                                        board.copy(stack=False)
+                                    )
+
+                                    if first_ok:
+                                        san = board.san(first_move)
+                                        board.push(first_move)
+                                        game_started = True
+                                        game_start_hits = 0
+                                        baseline_frame = (
+                                            first_verified_frame
+                                            if first_verified_frame is not None
+                                            else frame
+                                        )
+                                        cached_board_grid, _, _ = scan_board(
+                                            baseline_frame,
+                                            cached_board_coords
+                                        )
+
+                                        print(
+                                            f"[SYNC] White-human first move detected: "
+                                            f"{first_move.uci()}"
+                                        )
+                                        print(
+                                            f"[SYNC] Board advanced to: {san}"
+                                        )
+                                        print(
+                                            f"[SYNC] Physical board verified: "
+                                            f"{first_reason}"
+                                        )
+                                        print(
+                                            f"[SYNC] Turn = "
+                                            f"{'BLACK' if board.turn == chess.BLACK else 'WHITE'} / "
+                                            f"{'STOCKFISH' if board.turn == stockfish_color else 'HUMAN'}"
+                                        )
+
+                        if (
+                            not game_started
+                            and game_start_hits
                             >= GAME_START_CONFIRM_SAMPLES
                         ):
                             game_started = True
