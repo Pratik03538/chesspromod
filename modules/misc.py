@@ -1332,6 +1332,18 @@ def main():
                                         }
                                     )
 
+                                    selected_info = pending_entry.get(
+                                        "selected_info",
+                                        result
+                                    )
+
+                                    mate_pause_done = bool(
+                                        pending_entry.get(
+                                            "mate_pause_done",
+                                            False
+                                        )
+                                    )
+
                                     engine_elapsed = 0.0
 
                                     print(
@@ -1430,7 +1442,9 @@ def main():
                                         "san": best_san,
                                         "result": result,
                                         "best_info_move": best_info_move,
+                                        "selected_info": selected_info,
                                         "selection_meta": selection_meta,
+                                        "mate_pause_done": False,
                                     }
 
                                     print(
@@ -1793,6 +1807,27 @@ def main():
                                     )
 
                                 if not verified:
+                                    if not mate_pause_done:
+                                        mate_pause = mate_pause_seconds(
+                                            selected_info,
+                                            board.turn
+                                        )
+
+                                        if mate_pause > 0.0:
+                                            print(
+                                                "[MATE PAUSE] "
+                                                f"{mate_pause:.2f}s before "
+                                                f"{best_san}"
+                                            )
+                                            time.sleep(mate_pause)
+
+                                        mate_pause_done = True
+
+                                        if position_key in pending_bot_moves:
+                                            pending_bot_moves[
+                                                position_key
+                                            ]["mate_pause_done"] = True
+
                                     print(
                                         "[VALIDATION] PRE-CLICK PASS | "
                                         "physical board matches internal board 64/64"
