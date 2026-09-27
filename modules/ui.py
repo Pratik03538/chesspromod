@@ -129,27 +129,258 @@ def draw_overlay(
         except Exception:
             ui_state["mouse_ready"] = False
 
-    button_h = 34
-    button_gap = 8
-    button_w = min(
-        150,
+    # Keep the board itself clean. All controls and status information live
+    # outside the chessboard in one compact side panel.
+    match_state = getattr(
+        draw_overlay,
+        "_match_state",
+        "WAITING"
+    )
+
+    bot_state = getattr(
+        draw_overlay,
+        "_bot_state",
+        "WAITING"
+    )
+
+    bot_state_since = getattr(
+        draw_overlay,
+        "_bot_state_since",
+        time.perf_counter()
+    )
+
+    state_age = max(
+        0.0,
+        time.perf_counter() - bot_state_since
+    )
+
+    panel_w = min(
+        340,
         max(
-            120,
-            int(width * 0.17)
+            285,
+            int(width * 0.27)
         )
     )
 
-    buttons_x = max(
-        10,
-        width - (
-            button_w * 2
-            + button_gap
-            + 12
-        )
-    )
-    buttons_y = 10
+    x, y, w, h = board_coords
 
-    new_x1 = buttons_x
+    move_text = getattr(
+        draw_overlay,
+        "_move_history_text",
+        ""
+    )
+
+    tokens = move_text.split(
+        "  "
+    ) if move_text else []
+
+    max_move_lines = 12
+    if len(tokens) > max_move_lines:
+        tokens = tokens[-max_move_lines:]
+
+    button_h = 38
+    button_gap = 8
+    button_w = int(
+        (panel_w - 28 - button_gap) / 2
+    )
+
+    panel_h = (
+        18
+        + 24
+        + 24
+        + 42
+        + 54
+        + 16
+        + button_h
+        + 16
+        + 24
+        + max(1, len(tokens)) * 21
+        + 16
+    )
+
+    if panel_h > height - 20:
+        panel_h = height - 20
+
+    # Prefer right side, then left side, then below/above. Never draw the
+    # information panel over the chessboard when an outside position exists.
+    if x + w + panel_w + 16 <= width:
+        panel_x = x + w + 12
+        panel_y = max(
+            10,
+            min(
+                y,
+                height - panel_h - 10
+            )
+        )
+    elif x - panel_w - 16 >= 0:
+        panel_x = x - panel_w - 16
+        panel_y = max(
+            10,
+            min(
+                y,
+                height - panel_h - 10
+            )
+        )
+    elif y + h + panel_h + 16 <= height:
+        panel_x = max(
+            10,
+            min(
+                x,
+                width - panel_w - 10
+            )
+        )
+        panel_y = y + h + 12
+    else:
+        panel_x = max(
+            10,
+            min(
+                x,
+                width - panel_w - 10
+            )
+        )
+        panel_y = max(
+            10,
+            y - panel_h - 12
+        )
+
+    overlay = display_frame.copy()
+
+    cv2.rectangle(
+        overlay,
+        (panel_x, panel_y),
+        (
+            panel_x + panel_w,
+            panel_y + panel_h
+        ),
+        (12, 12, 16),
+        -1
+    )
+
+    cv2.addWeighted(
+        overlay,
+        0.90,
+        display_frame,
+        0.10,
+        0,
+        display_frame
+    )
+
+    cv2.rectangle(
+        display_frame,
+        (panel_x, panel_y),
+        (
+            panel_x + panel_w,
+            panel_y + panel_h
+        ),
+        (90, 90, 100),
+        1
+    )
+
+    cv2.putText(
+        display_frame,
+        "CHESS VISION",
+        (
+            panel_x + 12,
+            panel_y + 20
+        ),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.52,
+        (245, 245, 245),
+        1,
+        cv2.LINE_AA
+    )
+
+    cv2.putText(
+        display_frame,
+        "MATCH",
+        (
+            panel_x + 12,
+            panel_y + 43
+        ),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.36,
+        (155, 155, 165),
+        1,
+        cv2.LINE_AA
+    )
+
+    cv2.putText(
+        display_frame,
+        match_state,
+        (
+            panel_x + 76,
+            panel_y + 43
+        ),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.43,
+        (245, 245, 245),
+        1,
+        cv2.LINE_AA
+    )
+
+    side_text = (
+        f"BOT: {'BLACK' if stockfish_color == chess.BLACK else 'WHITE'}  "
+        f"YOU: {'BLACK' if human_color == chess.BLACK else 'WHITE'}"
+    )
+
+    cv2.putText(
+        display_frame,
+        side_text,
+        (
+            panel_x + 12,
+            panel_y + 64
+        ),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.34,
+        (185, 185, 195),
+        1,
+        cv2.LINE_AA
+    )
+
+    cv2.putText(
+        display_frame,
+        "BOT",
+        (
+            panel_x + 12,
+            panel_y + 89
+        ),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.36,
+        (155, 155, 165),
+        1,
+        cv2.LINE_AA
+    )
+
+    cv2.putText(
+        display_frame,
+        bot_state,
+        (
+            panel_x + 58,
+            panel_y + 89
+        ),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.41,
+        (245, 245, 245),
+        1,
+        cv2.LINE_AA
+    )
+
+    cv2.putText(
+        display_frame,
+        f"{state_age:.1f}s",
+        (
+            panel_x + panel_w - 52,
+            panel_y + 89
+        ),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.34,
+        (165, 165, 175),
+        1,
+        cv2.LINE_AA
+    )
+
+    buttons_y = panel_y + 106
+    new_x1 = panel_x + 12
     new_y1 = buttons_y
     new_x2 = new_x1 + button_w
     new_y2 = new_y1 + button_h
@@ -173,84 +404,197 @@ def draw_overlay(
         rematch_y2
     )
 
-    button_radius = 8
+    def draw_pill(
+        x1,
+        y1,
+        x2,
+        y2,
+        active,
+        label
+    ):
+        radius = min(
+            10,
+            int((y2 - y1) / 2)
+        )
+        fill = (
+            (35, 150, 82)
+            if active
+            else (55, 55, 62)
+        )
+        edge = (
+            (80, 205, 125)
+            if active
+            else (100, 100, 110)
+        )
 
-    cv2.rectangle(
-        display_frame,
-        (new_x1, new_y1),
-        (new_x2, new_y2),
-        (
-            (35, 150, 70)
-            if ui_state["new_game"]
-            else (70, 70, 70)
-        ),
-        -1
+        cv2.rectangle(
+            display_frame,
+            (
+                x1 + radius,
+                y1
+            ),
+            (
+                x2 - radius,
+                y2
+            ),
+            fill,
+            -1
+        )
+        cv2.rectangle(
+            display_frame,
+            (
+                x1,
+                y1 + radius
+            ),
+            (
+                x2,
+                y2 - radius
+            ),
+            fill,
+            -1
+        )
+        cv2.circle(
+            display_frame,
+            (
+                x1 + radius,
+                y1 + radius
+            ),
+            radius,
+            fill,
+            -1
+        )
+        cv2.circle(
+            display_frame,
+            (
+                x2 - radius,
+                y1 + radius
+            ),
+            radius,
+            fill,
+            -1
+        )
+        cv2.circle(
+            display_frame,
+            (
+                x1 + radius,
+                y2 - radius
+            ),
+            radius,
+            fill,
+            -1
+        )
+        cv2.circle(
+            display_frame,
+            (
+                x2 - radius,
+                y2 - radius
+            ),
+            radius,
+            fill,
+            -1
+        )
+        cv2.rectangle(
+            display_frame,
+            (x1, y1),
+            (x2, y2),
+            edge,
+            1
+        )
+
+        label_size = cv2.getTextSize(
+            label,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.38,
+            1
+        )[0]
+
+        cv2.putText(
+            display_frame,
+            label,
+            (
+                int(
+                    (x1 + x2 - label_size[0]) / 2
+                ),
+                y1 + 24
+            ),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.38,
+            (255, 255, 255),
+            1,
+            cv2.LINE_AA
+        )
+
+    draw_pill(
+        new_x1,
+        new_y1,
+        new_x2,
+        new_y2,
+        bool(ui_state["new_game"]),
+        "NEW ON" if ui_state["new_game"] else "NEW OFF"
     )
 
-    cv2.rectangle(
-        display_frame,
-        (rematch_x1, rematch_y1),
-        (rematch_x2, rematch_y2),
-        (
-            (35, 150, 70)
-            if ui_state["rematch"]
-            else (70, 70, 70)
-        ),
-        -1
+    draw_pill(
+        rematch_x1,
+        rematch_y1,
+        rematch_x2,
+        rematch_y2,
+        bool(ui_state["rematch"]),
+        "REMATCH ON" if ui_state["rematch"] else "REMATCH OFF"
     )
 
-    new_label = (
-        "NEW GAME: ON"
-        if ui_state["new_game"]
-        else "NEW GAME: OFF"
-    )
-
-    rematch_label = (
-        "REMATCH: ON"
-        if ui_state["rematch"]
-        else "REMATCH: OFF"
-    )
+    moves_y = buttons_y + button_h + 22
 
     cv2.putText(
         display_frame,
-        new_label,
+        "MOVES",
         (
-            new_x1 + 10,
-            new_y1 + 23
+            panel_x + 12,
+            moves_y
         ),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.40,
-        (255, 255, 255),
+        (155, 155, 165),
         1,
         cv2.LINE_AA
     )
 
-    cv2.putText(
-        display_frame,
-        rematch_label,
-        (
-            rematch_x1 + 10,
-            rematch_y1 + 23
-        ),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.40,
-        (255, 255, 255),
+    text_y = moves_y + 21
+
+    if not tokens:
+        tokens = [
+            "No moves yet"
+        ]
+
+    max_drawable_lines = max(
         1,
-        cv2.LINE_AA
+        int((panel_h - (text_y - panel_y) - 12) / 21)
     )
+
+    if len(tokens) > max_drawable_lines:
+        tokens = tokens[-max_drawable_lines:]
+
+    for token in tokens:
+        cv2.putText(
+            display_frame,
+            token,
+            (
+                panel_x + 12,
+                text_y
+            ),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.37,
+            (225, 225, 230),
+            1,
+            cv2.LINE_AA
+        )
+        text_y += 21
 
     # Keep the visual grid only while the grid is being positioned.
-    # Once locked, the captured chessboard stays clean.
     if not locked:
-        x, y, w, h = board_coords
         sq_w = w / 8.0
         sq_h = h / 8.0
 
-        grid_color = (
-            (0, 255, 255)
-            if not locked
-            else (0, 255, 0)
-        )
+        grid_color = (0, 255, 255)
 
         cv2.rectangle(
             display_frame,
@@ -288,113 +632,6 @@ def draw_overlay(
                 grid_color,
                 1
             )
-
-    move_text = getattr(
-        draw_overlay,
-        "_move_history_text",
-        ""
-    )
-
-    if not move_text:
-        return
-
-    tokens = move_text.split(
-        "  "
-    )
-
-    max_lines = 16
-    if len(tokens) > max_lines:
-        tokens = tokens[-max_lines:]
-
-    panel_w = min(
-        420,
-        max(
-            280,
-            int(width * 0.34)
-        )
-    )
-    line_h = 21
-    header_h = 12
-    panel_h = 18 + header_h + (
-        len(tokens)
-        * line_h
-    )
-
-    x, y, w, h = board_coords
-
-    if (
-        x + w + panel_w + 18
-        <= width
-    ):
-        panel_x = x + w + 10
-        panel_y = max(
-            54,
-            min(
-                y,
-                height - panel_h - 10
-            )
-        )
-    else:
-        panel_x = 10
-        panel_y = 54
-
-    overlay = display_frame.copy()
-
-    cv2.rectangle(
-        overlay,
-        (
-            panel_x,
-            panel_y
-        ),
-        (
-            panel_x + panel_w,
-            panel_y + panel_h
-        ),
-        (10, 10, 10),
-        -1
-    )
-
-    cv2.addWeighted(
-        overlay,
-        0.88,
-        display_frame,
-        0.12,
-        0,
-        display_frame
-    )
-
-    cv2.putText(
-        display_frame,
-        "MOVES",
-        (
-            panel_x + 10,
-            panel_y + 16
-        ),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.48,
-        (255, 255, 255),
-        1,
-        cv2.LINE_AA
-    )
-
-    text_y = panel_y + 35
-
-    for token in tokens:
-        cv2.putText(
-            display_frame,
-            token,
-            (
-                panel_x + 10,
-                text_y
-            ),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.43,
-            (235, 235, 235),
-            1,
-            cv2.LINE_AA
-        )
-
-        text_y += line_h
 
 
 def format_board_for_screen(
