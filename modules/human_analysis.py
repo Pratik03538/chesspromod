@@ -128,6 +128,61 @@ def _clamp(value, low=0.0, high=100.0):
     )
 
 
+def _percentile(values, p):
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    index = (len(ordered) - 1) * p
+    low = int(index)
+    high = min(low + 1, len(ordered) - 1)
+    fraction = index - low
+    return ordered[low] + (ordered[high] - ordered[low]) * fraction
+
+
+def _coefficient_of_variation(values):
+    mean = _mean(values)
+    if mean <= 0.0 or len(values) < 2:
+        return 0.0
+    return _stdev(values) / mean
+
+
+def _adjacent_similarity(values):
+    if len(values) < 3:
+        return 0.0
+    diffs = [abs(b - a) for a, b in zip(values, values[1:])]
+    scale = max(_mean(values), 0.01)
+    return _clamp(100.0 - (_mean(diffs) / scale) * 120.0)
+
+
+def _rank_entropy(ranks):
+    if not ranks:
+        return 0.0
+    counts = {}
+    for rank in ranks:
+        counts[rank] = counts.get(rank, 0) + 1
+    total = float(len(ranks))
+    entropy = 0.0
+    for count in counts.values():
+        p = count / total
+        entropy -= p * math.log(p, 2)
+    max_entropy = math.log(min(8, len(ranks)), 2) if len(ranks) > 1 else 1.0
+    return _clamp(entropy / max_entropy * 100.0) if max_entropy > 0 else 0.0
+
+
+def _touch_offset_stats(touch):
+    if not touch:
+        return 0.0, 0.0, 0.0
+    radial = []
+    source_target_lengths = []
+    for item in touch:
+        sx, sy = item['source']
+        tx, ty = item['target']
+        radial.append(math.hypot(sx % 100 - 50, sy % 100 - 50))
+        source_target_lengths.append(math.hypot(tx - sx, ty - sy))
+    return _mean(radial), _stdev(radial), _mean(source_target_lengths)
+
 def print_report(game_board=None):
     _ensure_session()
 
